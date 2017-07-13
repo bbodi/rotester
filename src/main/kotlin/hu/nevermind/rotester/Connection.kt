@@ -131,7 +131,7 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                             }
                         } else {
                             incomingBuffer.position(startOfFirstUnprocessedByte)
-                            val remainingBytesAsString = toHexDump(incomingBuffer, beginOfPacketPos, indexOfLastIncomingByte)
+                            val remainingBytesAsString = toHexDump(incomingBuffer.duplicate(), beginOfPacketPos, indexOfLastIncomingByte)
                             println("Unknown packet\n$remainingBytesAsString")
                             println("Packets in buffer: ${incomingPackets.joinToString("\n    ")}")
                             run = false
@@ -159,7 +159,7 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
         }
     }
 
-    public fun getHexDump(): String = toHexDump(incomingBuffer, startOfFirstUnprocessedByte, indexOfLastIncomingByte)
+    public fun getHexDump(): String = toHexDump(incomingBuffer.duplicate(), startOfFirstUnprocessedByte, indexOfLastIncomingByte)
 
     private fun toHexDump(byteBuffer: ByteBuffer, startPos: Int, endPos: Int): String {
         byteBuffer.position(startPos)

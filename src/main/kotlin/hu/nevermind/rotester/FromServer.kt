@@ -572,6 +572,43 @@ object FromServer {
         }
     }
 
+    data class NotifyChat(val gid: Int, val msg: String) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> NotifyChat? = {
+                val len = byte2() - 8
+                FromServer.NotifyChat(
+                        gid = byte4(),
+                        msg = string(len)
+                )
+            }
+        }
+    }
+
+    data class BroadcastMessage(val msg: String) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> BroadcastMessage? = {
+                val len = byte2() - 4
+                FromServer.BroadcastMessage(
+                        msg = string(len)
+                )
+            }
+        }
+    }
+
+
+    data class HpBarUpdate(val gid: Int, val hp: Int, val maxHp: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> HpBarUpdate? = {
+                FromServer.HpBarUpdate(
+                        gid = byte4(),
+                        hp = byte4(),
+                        maxHp = byte4()
+                )
+            }
+        }
+    }
+
+
 
     data class UpdateSkillTree(val skillInfos: Array<SkillInfo>) : Packet {
         companion object {
@@ -711,7 +748,10 @@ object FromServer {
             Triple(0x87, 12, WalkOk.reader),
             Triple(0xa00, 269, Hotkeys.reader),
             Triple(0x80, 7, MakeUnitDisappear.reader),
-            Triple(0x86, 16, ObjectMove.reader)
+            Triple(0x86, 16, ObjectMove.reader),
+            Triple(0x8d, 0, NotifyChat.reader),
+            Triple(0x80e, 14, HpBarUpdate.reader),
+            Triple(0x9a, 0, BroadcastMessage.reader)
     )
 
     class PacketFieldReader(val bb: ByteBuffer) {

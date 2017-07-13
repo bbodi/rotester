@@ -1,19 +1,19 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
 import java.util.*
 
-sealed class GmActorMessage()
-data class SpawnMonster(val monsterName: String, val dstMapName: String, val dstX: Int, val dstY: Int, val monsterCount: Int = 1) : GmActorMessage()
 
-class GmActor(private val username: String, private val password: String) {
+class PlayerActor(private val username: String, private val password: String, gmActorChannel: SendChannel<GmActorMessage>) {
 
 
     val actor = actor<GmActorMessage>(CommonPool) {
         var mapName: String = ""
         var pos: Pos = Pos(0, 0, 0)
+
         try {
             val loginResponse = login(username, password)
 
@@ -44,22 +44,22 @@ class GmActor(private val username: String, private val password: String) {
                 val changeMapPacket = packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
                 mapSession.send(ToServer.LoadEndAck())
                 packetArrivalVerifier.waitForPacket(FromServer.EquipCheckbox::class, 5000)
-
-                packetArrivalVerifier.cleanPacketHistory()
-//                packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
-                mapSession.send(ToServer.Chat("$charName : GM is here!"))
-                mapSession.send(ToServer.Chat("$charName : ($mapName): ${pos.x}, ${pos.y}"))
-
-                for (msg in channel) {
-                    when (msg) {
-                        is SpawnMonster -> {
-                            mapSession.send(ToServer.Chat("$charName : @warp ${msg.dstMapName} ${msg.dstX} ${msg.dstY}"))
-                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
-                            mapSession.send(ToServer.Chat("$charName : @spawn ${msg.monsterName} ${msg.monsterCount}"))
-                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
-                        }
-                    }
+                gmActorChannel.send(SpawnMonster("pupa", mapName.dropLast(4), pos.x, pos.y, 10))
+                // changeMapPacket.pos.x, changeMapPacket.pos.y-1
+                // 84 lefele van a 85hoy kepest$
+                var (x, y) = changeMapPacket.x to changeMapPacket.y
+                var yDir = 1
+                (0 until 1).forEach { walkCount ->
+                    mapSession.send(ToServer.WalkTo(x, y + yDir))
+                    packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
+                    y += yDir
+                    yDir *= -1
+                    println("$walkCount ok ;)")
+                    delay(1000)
                 }
+                packetArrivalVerifier.cleanPacketHistory()
+                mapSession.send(ToServer.Chat("$charName : Hello World!"))
+                mapSession.send(ToServer.Chat("$charName : ($mapName): ${pos.x}, ${pos.y}"))
             }
         } catch (e: Exception) {
             e.printStackTrace()

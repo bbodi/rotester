@@ -1,12 +1,10 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
-import kotlinx.coroutines.experimental.delay
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.*
 
 
 fun main(args: Array<String>) = runBlocking {
@@ -14,7 +12,10 @@ fun main(args: Array<String>) = runBlocking {
     //    val socketChannel = SocketChannel.open()
     val jobs = List(1) { index ->
         launch(CommonPool) {
-            GmActor("bot1", "bot1").actor.join()
+            val gmActor = GmActor("gmgm", "gmgm")
+            val player = PlayerActor("bot1", "bot1", gmActor.actor.channel)
+            gmActor.actor.join()
+//            GmActor("bot1", "bot1").actor.join()
         }
     }
     jobs.forEach { it.join() }
