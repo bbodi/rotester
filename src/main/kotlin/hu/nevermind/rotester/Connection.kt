@@ -143,6 +143,8 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                         } else if (startOfFirstUnprocessedByte == indexOfLastIncomingByte) {
                             run = false
                             incomingBuffer.clear()
+                            startOfFirstUnprocessedByte = 0
+                            indexOfLastIncomingByte = 0
                             continuation.resume(incomingPackets)
                         }
                         delay(10)

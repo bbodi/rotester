@@ -560,6 +560,18 @@ object FromServer {
         }
     }
 
+    data class ObjectMove(val gid: Int, val pos: PosChange, val walkStartTime: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> ObjectMove? = {
+                FromServer.ObjectMove(
+                        gid = byte4(),
+                        pos = positionChange(),
+                        walkStartTime = byte4()
+                )
+            }
+        }
+    }
+
 
     data class UpdateSkillTree(val skillInfos: Array<SkillInfo>) : Packet {
         companion object {
@@ -698,7 +710,8 @@ object FromServer {
             Triple(0xb6, 3, ScriptClose.reader),
             Triple(0x87, 12, WalkOk.reader),
             Triple(0xa00, 269, Hotkeys.reader),
-            Triple(0x80, 7, MakeUnitDisappear.reader)
+            Triple(0x80, 7, MakeUnitDisappear.reader),
+            Triple(0x86, 16, ObjectMove.reader)
     )
 
     class PacketFieldReader(val bb: ByteBuffer) {
@@ -738,6 +751,18 @@ object FromServer {
             )
         }
 
+        fun positionChange(): PosChange {
+            val b0 = byte1()
+            val b1 = byte1()
+            val b2 = byte1()
+            val b3 = byte1()
+            val b4 = byte1()
+            val b5 = byte1()
+            return PosChange(
+                    0, 0, 0, 0, 0, 0
+            )
+        }
+
         fun string(maxBytesIncludingNullTerminator: Int): String {
             val byteArray = kotlin.ByteArray(maxBytesIncludingNullTerminator)
             bb.get(byteArray)
@@ -753,3 +778,6 @@ object FromServer {
 }
 
 data class Pos(val x: Int, val y: Int, val dir: Int)
+
+// WBUFPOS2
+data class PosChange(val srcX: Int, val srcY: Int, val dstX: Int, val dstY: Int, val sx: Int, val sy: Int)
