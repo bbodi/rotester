@@ -1,14 +1,20 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.util.*
 
 sealed class GmActorMessage()
+class SendHeartbeat : GmActorMessage()
 data class SpawnMonster(val monsterName: String, val dstMapName: String, val dstX: Int, val dstY: Int, val monsterCount: Int = 1) : GmActorMessage()
 
 class GmActor(private val username: String, private val password: String) {
+
+    private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
 
 
     val actor = actor<GmActorMessage>(CommonPool) {
@@ -19,10 +25,10 @@ class GmActor(private val username: String, private val password: String) {
 
             val charServerIp = toIpString(loginResponse.charServerDatas[0].ip)
 
-            val (mapData, charName) = loginToMapServer(charServerIp, loginResponse)
+            val (mapData, charName) = connectToCharServerAndSelectChar(charServerIp, loginResponse, 0)
             mapName = mapData.mapName
             Session(connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
-                println("connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
+                logger.info("$username connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
                 val packetArrivalVerifier = PacketArrivalVerifier()
                 mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
                 mapSession.asyncStartProcessingIncomingPackets()
@@ -36,72 +42,48 @@ class GmActor(private val username: String, private val password: String) {
                 var blId = 0
                 packetArrivalVerifier.inCaseOf(FromServer.ConnectToMapServerResponse::class, 5000) { p ->
                     blId = p.blockListId
-                    println("blId: $blId")
+                    logger.debug("$username: blId: $blId")
                 }
-                packetArrivalVerifier.inCaseOf(FromServer.MapAuthOk::class, 5000) { p ->
-                    pos = p.pos
-                }
-                val changeMapPacket = packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
+                pos = packetArrivalVerifier.waitForPacket(FromServer.MapAuthOk::class, 5000).pos
                 mapSession.send(ToServer.LoadEndAck())
+                val changeMapPacket = packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
                 packetArrivalVerifier.waitForPacket(FromServer.EquipCheckbox::class, 5000)
+                async(CommonPool) {
+                    while (true) {
+                        this@actor.channel.send(SendHeartbeat())
+                        delay(5000)
+                    }
+                }
 
-                packetArrivalVerifier.cleanPacketHistory()
-//                packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
                 mapSession.send(ToServer.Chat("$charName : GM is here!"))
-                mapSession.send(ToServer.Chat("$charName : ($mapName): ${pos.x}, ${pos.y}"))
-
+//                mapSession.send(ToServer.Chat("$charName : ($mapName): ${pos.x}, ${pos.y}"))
+                packetArrivalVerifier.cleanPacketHistory()
                 for (msg in channel) {
+                    logger.debug("{}: incoming command: {}", username, msg)
                     when (msg) {
                         is SpawnMonster -> {
                             mapSession.send(ToServer.Chat("$charName : @warp ${msg.dstMapName} ${msg.dstX} ${msg.dstY}"))
                             packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
                             mapSession.send(ToServer.Chat("$charName : @spawn ${msg.monsterName} ${msg.monsterCount}"))
                             packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
+                            mapSession.send(ToServer.Chat("$charName : asd"))
+                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000)
+                        }
+                        is SendHeartbeat -> {
+                            val start = Date().time
+                            mapSession.send(ToServer.TickSend())
+                            packetArrivalVerifier.waitForPacket(FromServer.NotifyTime::class, 5000)
+                            val end = Date().time
+                            logger.debug("$username ping: ${end - start} ms")
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.error("error", e)
             throw e;
         }
-    }
-
-    private suspend fun loginToMapServer(charServerIp: String, loginResponse: FromServer.LoginSucceedResponsePacket): Pair<FromServer.MapServerData, String> {
-        Session(connect(charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
-            val packetArrivalVerifier = PacketArrivalVerifier()
-            charSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
-            charSession.send(ToServer.CharServerInit(
-                    accountId = loginResponse.accountId,
-                    loginId = loginResponse.loginId,
-                    userLevel = loginResponse.userLevel,
-                    sex = loginResponse.sex
-            ))
-            val newAuthId = charSession.connection.readInt()
-            charSession.asyncStartProcessingIncomingPackets()
-            packetArrivalVerifier.waitForPacket(FromServer.CharWindow::class, 5000)
-            val characterList = packetArrivalVerifier.waitForPacket(FromServer.CharacterList::class, 5000)
-            val pincodeState = packetArrivalVerifier.waitForPacket(FromServer.PincodeState::class, 5000)
-            if (pincodeState.state != 0) {
-                error("pincode is enabled! Please disable it in conf/char_athena.conf")
-            }
-            charSession.send(ToServer.SelectChar(0))
-            val mapData = packetArrivalVerifier.waitForPacket(FromServer.MapServerData::class, 5000)
-            println("$mapData")
-            return mapData to characterList.charInfos[0].name
-        }
-    }
-
-    private suspend fun login(username: String, password: String): FromServer.LoginSucceedResponsePacket {
-        val loginSession = Session(connect("localhost", 6900))
-        loginSession.asyncStartProcessingIncomingPackets()
-        val packetArrivalVerifier = PacketArrivalVerifier()
-        loginSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
-        loginSession.send(ToServer.LoginPacket(username, password))
-        packetArrivalVerifier.inCaseOf(FromServer.CharSelectErrorResponse::class) { p ->
-            println("Login error: ${p.reason}")
-        }
-        return packetArrivalVerifier.waitForPacket(FromServer.LoginSucceedResponsePacket::class, 5000)
+        logger.info("$username END")
     }
 
 }

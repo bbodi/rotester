@@ -487,10 +487,10 @@ object FromServer {
         }
     }
 
-    data class SpriteChange(val id: Int, val type: Int, val val1: Int, val val2: Int) : Packet {
+    data class SpriteChange2(val id: Int, val type: Int, val val1: Int, val val2: Int) : Packet {
         companion object {
-            val reader: FromServer.PacketFieldReader.() -> SpriteChange? = {
-                FromServer.SpriteChange(
+            val reader: FromServer.PacketFieldReader.() -> SpriteChange2? = {
+                FromServer.SpriteChange2(
                         id = byte4(),
                         type = byte1(),
                         val1 = byte2(),
@@ -499,6 +499,40 @@ object FromServer {
             }
         }
     }
+
+    data class NpcSpriteChange(val gid: Int, val type: Int, val value: Long) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> NpcSpriteChange? = {
+                FromServer.NpcSpriteChange(
+                        gid = byte4(),
+                        type = ubyte1(),
+                        value = ubyte4()
+                )
+            }
+        }
+    }
+
+    data class UpdateName(val gid: Int, val name: String) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> UpdateName? = {
+                FromServer.UpdateName(
+                        gid = byte4(),
+                        name = string(24)
+                )
+            }
+        }
+    }
+
+    data class ItemDisappear(val itemId: Long) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> ItemDisappear? = {
+                FromServer.ItemDisappear(
+                        itemId = ubyte4()
+                )
+            }
+        }
+    }
+
 
     data class PartyInvitationState(val allowed: Boolean) : Packet {
         companion object {
@@ -572,12 +606,51 @@ object FromServer {
         }
     }
 
+    data class StopMove(val gid: Int, val x: Int, val y: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> StopMove? = {
+                FromServer.StopMove(
+                        gid = byte4(),
+                        x = byte2(),
+                        y = byte2()
+                )
+            }
+        }
+    }
+
+
     data class NotifyChat(val gid: Int, val msg: String) : Packet {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> NotifyChat? = {
                 val len = byte2() - 8
                 FromServer.NotifyChat(
                         gid = byte4(),
+                        msg = string(len)
+                )
+            }
+        }
+    }
+
+    /// 018b <result>.W
+    /// result:
+    ///     0 = disconnect (quit)
+    ///     1 = cannot disconnect (wait 10 seconds)
+    ///     ? = ignored
+    data class ResponseToDisconnectionRequest(val type: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> ResponseToDisconnectionRequest? = {
+                FromServer.ResponseToDisconnectionRequest(
+                        type = byte2()
+                )
+            }
+        }
+    }
+
+    data class NotifySelfChat(val msg: String) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> NotifySelfChat? = {
+                val len = byte2() - 4
+                FromServer.NotifySelfChat(
                         msg = string(len)
                 )
             }
@@ -608,6 +681,189 @@ object FromServer {
         }
     }
 
+    data class Emotion(val gid: Int, val type: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> Emotion? = {
+                FromServer.Emotion(
+                        gid = byte4(),
+                        type = byte1()
+                )
+            }
+        }
+    }
+
+    data class SetMapProperty(val property: Int, val flags: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> SetMapProperty? = {
+                FromServer.SetMapProperty(
+                        property = byte2(),
+                        flags = byte4()
+                )
+            }
+        }
+    }
+
+    data class InitializeIdleOrSpawningUnit(
+            val blType: Int,
+            val payloadLength: Int,
+            val blId: Int,
+            val charId: Int,
+            val speed: Int,
+            val statusChangeOpt1: Int,
+            val statusChangeOpt2: Int,
+            val statusChangeOption: Int,
+            val viewDataClass: Int,
+            val viewDataHairStyle: Int,
+            val viewDataWeapon: Int,
+            val viewDataShield: Int,
+            val viewDataHeadBottom: Int,
+            val viewDataHeadTop: Int,
+            val viewDataHeadMid: Int,
+            val flagEmblemId: Int,
+            val guildIdUpper2Bytes: Int,
+            val guildIdLower2Bytes: Int,
+            val viewDataHairColor: Int,
+            val viewDataClothColor: Int,
+            val viewDataHeadDir: Int,
+            val viewDataRobe: Int,
+            val guildId: Int,
+            val emblemId: Int,
+            val manner: Int,
+            val statusChangeOpt3: Int,
+            val karma: Int,
+            val viewDataSex: Int,
+            val pos: Pos,
+            val deadSit: Int,
+
+            val level: Int,
+            val font: Int,
+            val maxHp: Int,
+            val hp: Int,
+            val isBoss: Boolean,
+            val viewDataBodyStyle: Int,
+            val name: String
+    ) : Packet {
+        companion object {
+            val forSpawnUnit = reader(true)
+            val forIdleUnit = reader(false)
+            private fun reader(spawned: Boolean): FromServer.PacketFieldReader.() -> InitializeIdleOrSpawningUnit? = {
+                val payloadLength = byte2()
+                val blType = byte1()
+                // WBUFW(buf,2) = (uint16)((spawn ? 79 : 80)+strlen(name));
+                val blId = byte4()
+                val charId = byte4()
+                val speed = byte2()
+                val statusChangeOpt1 = byte2()
+                val statusChangeOpt2 = byte2()
+                val statusChangeOption = byte4()
+                val viewDataClass = byte2()
+                val viewDataHairStyle = byte2()
+                val viewDataWeapon = byte2()
+                val viewDataShield = byte2()
+                val viewDataHeadBottom = byte2()
+                val viewDataHeadTop = byte2()
+                val viewDataHeadMid = byte2()
+                val (flagEmblemId, guildIdUpper2Bytes, guildIdLower2Bytes) = if (blType == 0x080 /*BL_NPC*/ && viewDataClass == 722 /*FLAG_CLASS*/) {
+                    Triple(byte2(), byte2(), byte2())
+                } else Triple(0, 0, 0)
+                val viewDataHairColor = byte2()
+                val viewDataClothColor = byte2()
+                val viewDataHeadDir = byte2()
+                val viewDataRobe = byte2()
+                val guildId = byte4()
+                val emblemId = byte2()
+                val manner = byte2()
+                val statusChangeOpt3 = byte4()
+                val karma = byte1()
+                val viewDataSex = byte1()
+                val pos = mapPosition()
+                val unk1 = byte1() // xsize?
+                val unk2 = byte1() // ysize?
+                // WBUFB(buf,49) = (sd)? 5 : 0;
+                // WBUFB(buf,50) = (sd)? 5 : 0;
+                val deadSit = if (!spawned) {
+                    byte1()
+                } else 0
+                val level = byte2()
+                val font = byte2()
+                val maxHp = byte4()
+                val hp = byte4()
+                val isBoss = byte1() == 1
+                val viewDataBodyStyle = byte2()
+                val name = string(payloadLength - readBytes - 2)
+                val ret = InitializeIdleOrSpawningUnit(
+                        blType, payloadLength, blId, charId, speed,
+                        statusChangeOpt1, statusChangeOpt2, statusChangeOption,
+                        viewDataClass, viewDataHairStyle, viewDataWeapon, viewDataShield, viewDataHeadBottom, viewDataHeadTop,
+                        viewDataHeadMid,
+                        flagEmblemId, guildIdUpper2Bytes, guildIdLower2Bytes,
+                        viewDataHairColor, viewDataClothColor, viewDataHeadDir, viewDataRobe, guildId, emblemId,
+                        manner, statusChangeOpt3, karma, viewDataSex, pos, deadSit, level, font, maxHp,
+                        hp, isBoss, viewDataBodyStyle, name
+                )
+                setReadingByteCountsAfterHeaderIsAlreadyRead(payloadLength - 2)
+                ret
+            }
+        }
+    }
+
+
+    data class NotifyTime(val serverTime: Long) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> NotifyTime? = {
+                FromServer.NotifyTime(
+                        serverTime = ubyte4()
+                )
+            }
+        }
+    }
+
+    enum class ItemType {
+        HEALING,
+        UNKNOWN, //1
+        USABLE, //2, stackable
+        ETC, //3, stackable
+        ARMOR, //4
+        WEAPON, //5
+        CARD, //6, stackable
+        PETEGG, //7, 0
+        PETARMOR, //8, 0
+        UNKNOWN2, //9, 0
+        AMMO, //10, stackable
+        DELAYCONSUME, //11, stackable
+        SHADOWGEAR, //12
+        CASH //18
+    }
+
+    data class InventoryList(val size: Int) : Packet {
+        companion object {
+            const val sizeOfOneItem = 57
+            val reader: FromServer.PacketFieldReader.() -> InventoryList? = {
+                val size = byte2()
+                skip(size - 4)
+                FromServer.InventoryList(
+                        size = size
+                )
+                /*val index = byte2()
+                val viewIdOrNameId = byte2()
+                val type = ItemType.values()[byte1()]
+                val stackable = type in listOf(ItemType.USABLE, ItemType.AMMO, ItemType.CARD, ItemType.DELAYCONSUME, ItemType.ETC,
+                        ItemType.HEALING)
+                if (stackable) {
+                    val amount = byte2()
+                    val wearState = ubyte4()
+                    val expireTime = ubyte4()
+                    val cards = bytes(8) // 4 byte2
+                    val identify = byte1()
+                    //WBUFB(buf,n+23) = it->identify; //0x1 IsIdentified
+                    //WBUFB(buf,n+23) |= (it->favorite) ? 0x2 : 0; //0x4,0x2 PlaceETCTab
+                } else {
+                    skip(31)
+                }
+                */
+            }
+        }
+    }
 
 
     data class UpdateSkillTree(val skillInfos: Array<SkillInfo>) : Packet {
@@ -739,19 +995,32 @@ object FromServer {
             Triple(0x13a, 4, UpdateStatus_13a.reader),
             Triple(0x141, 14, UpdateStatus_141.reader),
             Triple(0x121, 14, UpdateStatus_121.reader),
-            Triple(0x1d7, 11, SpriteChange.reader),
+            Triple(0x1d7, 11, SpriteChange2.reader),
+            Triple(0x1b0, 11, NpcSpriteChange.reader),
             Triple(0x10f, 0, UpdateSkillTree.reader),
             Triple(0xbd, 44, InitialStatus.reader),
             Triple(0x2c9, 3, PartyInvitationState.reader),
+            Triple(0x95, 30, UpdateName.reader),
+            Triple(0xa1, 6, ItemDisappear.reader),
             Triple(0x2da, 3, EquipCheckbox.reader),
-            Triple(0xb6, 3, ScriptClose.reader),
+            Triple(0xb6, 6, ScriptClose.reader),
             Triple(0x87, 12, WalkOk.reader),
             Triple(0xa00, 269, Hotkeys.reader),
             Triple(0x80, 7, MakeUnitDisappear.reader),
             Triple(0x86, 16, ObjectMove.reader),
+            Triple(0x88, 10, StopMove.reader),
             Triple(0x8d, 0, NotifyChat.reader),
+            Triple(0x8e, 0, NotifySelfChat.reader),
+            Triple(0x18b, 4, ResponseToDisconnectionRequest.reader),
             Triple(0x80e, 14, HpBarUpdate.reader),
-            Triple(0x9a, 0, BroadcastMessage.reader)
+            Triple(0x9a, 0, BroadcastMessage.reader),
+            Triple(0xc0, 7, Emotion.reader),
+            Triple(0x99b, 8, SetMapProperty.reader),
+            Triple(0x9ff, 0, InitializeIdleOrSpawningUnit.forIdleUnit),
+            Triple(0x9fe, 0, InitializeIdleOrSpawningUnit.forSpawnUnit),
+            Triple(0xa0d, 0, InventoryList.reader),
+            Triple(0x991, 0, InventoryList.reader),
+            Triple(0x7f, 6, NotifyTime.reader)
     )
 
     class PacketFieldReader(val bb: ByteBuffer) {
@@ -772,12 +1041,28 @@ object FromServer {
             return bb.get().toInt()
         }
 
+        fun setReadingByteCountsAfterHeaderIsAlreadyRead(bytes: Int) {
+            bb.position(startPos + bytes)
+        }
+
         fun byte2(): Int {
             return bb.getShort().toInt()
         }
 
         fun byte4(): Int {
             return bb.getInt()
+        }
+
+        fun ubyte1(): Int {
+            return java.lang.Byte.toUnsignedInt(bb.get())
+        }
+
+        fun ubyte2(): Int {
+            return java.lang.Short.toUnsignedInt(bb.getShort())
+        }
+
+        fun ubyte4(): Long {
+            return Integer.toUnsignedLong(byte4())
         }
 
         fun mapPosition(): Pos {

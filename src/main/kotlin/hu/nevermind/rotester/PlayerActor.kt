@@ -1,6 +1,7 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
@@ -19,7 +20,7 @@ class PlayerActor(private val username: String, private val password: String, gm
 
             val charServerIp = toIpString(loginResponse.charServerDatas[0].ip)
 
-            val (mapData, charName) = loginToMapServer(charServerIp, loginResponse)
+            val (mapData, charName) = connectToCharServerAndSelectChar(charServerIp, loginResponse, 0)
             mapName = mapData.mapName
             Session(connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
                 println("connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
@@ -44,11 +45,11 @@ class PlayerActor(private val username: String, private val password: String, gm
                 val changeMapPacket = packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
                 mapSession.send(ToServer.LoadEndAck())
                 packetArrivalVerifier.waitForPacket(FromServer.EquipCheckbox::class, 5000)
-                gmActorChannel.send(SpawnMonster("pupa", mapName.dropLast(4), pos.x, pos.y, 10))
+                gmActorChannel.send(SpawnMonster("pupa", mapName.dropLast(4), pos.x, pos.y, 1))
                 // changeMapPacket.pos.x, changeMapPacket.pos.y-1
                 // 84 lefele van a 85hoy kepest$
                 var (x, y) = changeMapPacket.x to changeMapPacket.y
-                var yDir = 1
+                var yDir = -1
                 (0 until 1).forEach { walkCount ->
                     mapSession.send(ToServer.WalkTo(x, y + yDir))
                     packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
@@ -66,42 +67,4 @@ class PlayerActor(private val username: String, private val password: String, gm
             throw e;
         }
     }
-
-    private suspend fun loginToMapServer(charServerIp: String, loginResponse: FromServer.LoginSucceedResponsePacket): Pair<FromServer.MapServerData, String> {
-        Session(connect(charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
-            val packetArrivalVerifier = PacketArrivalVerifier()
-            charSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
-            charSession.send(ToServer.CharServerInit(
-                    accountId = loginResponse.accountId,
-                    loginId = loginResponse.loginId,
-                    userLevel = loginResponse.userLevel,
-                    sex = loginResponse.sex
-            ))
-            val newAuthId = charSession.connection.readInt()
-            charSession.asyncStartProcessingIncomingPackets()
-            packetArrivalVerifier.waitForPacket(FromServer.CharWindow::class, 5000)
-            val characterList = packetArrivalVerifier.waitForPacket(FromServer.CharacterList::class, 5000)
-            val pincodeState = packetArrivalVerifier.waitForPacket(FromServer.PincodeState::class, 5000)
-            if (pincodeState.state != 0) {
-                error("pincode is enabled! Please disable it in conf/char_athena.conf")
-            }
-            charSession.send(ToServer.SelectChar(0))
-            val mapData = packetArrivalVerifier.waitForPacket(FromServer.MapServerData::class, 5000)
-            println("$mapData")
-            return mapData to characterList.charInfos[0].name
-        }
-    }
-
-    private suspend fun login(username: String, password: String): FromServer.LoginSucceedResponsePacket {
-        val loginSession = Session(connect("localhost", 6900))
-        loginSession.asyncStartProcessingIncomingPackets()
-        val packetArrivalVerifier = PacketArrivalVerifier()
-        loginSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
-        loginSession.send(ToServer.LoginPacket(username, password))
-        packetArrivalVerifier.inCaseOf(FromServer.CharSelectErrorResponse::class) { p ->
-            println("Login error: ${p.reason}")
-        }
-        return packetArrivalVerifier.waitForPacket(FromServer.LoginSucceedResponsePacket::class, 5000)
-    }
-
 }

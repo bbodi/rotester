@@ -4,6 +4,8 @@ import kotlinx.coroutines.experimental.*
 import kotlinx.coroutines.experimental.channels.Channel
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.actor
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import kotlin.reflect.KClass
 
 sealed class IncomingPacketSubscriberMessage
@@ -18,12 +20,14 @@ class ClearHistory() : IncomingPacketSubscriberMessage()
 
 class PacketArrivalVerifier() {
 
+    private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
+
     suspend fun <T> waitForPacket(expectedPacketClass: KClass<T>, timeout: Long): T
             where T : FromServer.Packet {
         val responseChannel = Channel<FromServer.Packet>()
         var ok = false
         return async(CommonPool) {
-            println("waiting for $expectedPacketClass")
+            logger.trace("waiting for $expectedPacketClass")
             actor.send(IncaseOfPacketMessage(expectedPacketClass as KClass<FromServer.Packet>, timeout,
                     timeoutAction = {
                         if (!ok) {
@@ -39,7 +43,7 @@ class PacketArrivalVerifier() {
     }
 
     suspend fun cleanPacketHistory() {
-        println("cleaning packet history")
+        logger.debug("cleaning packet history")
         actor.send(ClearHistory())
     }
 
@@ -71,7 +75,7 @@ class PacketArrivalVerifier() {
                             }
                         }))
                 responseChannel.receive()
-                println("Expected packet arrived: ${expectedPacketClass}")
+                logger.debug("Expected packet arrived: ${expectedPacketClass}")
                 arrivedCount++
             }
         }
@@ -123,8 +127,11 @@ class PacketArrivalVerifier() {
 
 class Session(val connection: Connection) : AutoCloseable {
 
+    private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
+
     override fun close() {
-        println("Close session. Buffer: \n" + connection.getHexDump())
+        connection.close()
+        logger.info("Close session. Buffer: \n" + connection.getHexDump())
     }
 
     private var packetArrivalSubscribers: MutableList<SendChannel<IncomingPacketArrivedMessage>> = arrayListOf()
@@ -141,7 +148,6 @@ class Session(val connection: Connection) : AutoCloseable {
     suspend fun readIncomingPocketsFromSocket() {
         val incomingPackets = connection.readPackets()
         incomingPackets.forEach { incomingPacket ->
-            println("Incoming packet: $incomingPacket")
             packetArrivalSubscribers.forEach {
                 it.send(IncomingPacketArrivedMessage(incomingPacket))
             }
@@ -157,7 +163,7 @@ class Session(val connection: Connection) : AutoCloseable {
     }
 
     suspend fun send(packet: ToServer.Packet) {
-        println("[Send] $packet")
+        logger.trace("[Send] $packet")
         connection.fill(packet)
         connection.send()
     }

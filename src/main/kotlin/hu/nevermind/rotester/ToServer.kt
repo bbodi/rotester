@@ -1,6 +1,7 @@
 package hu.nevermind.rotester
 
 import java.nio.ByteBuffer
+import java.util.*
 
 
 object ToServer {
@@ -72,7 +73,7 @@ object ToServer {
         }
     }
 
-    class ConnectToMapServer(val accountId: Int, val charId: Int, val loginId: Int, val clientTick: Int, val sex: Int) : Packet(0x72) {
+    class ConnectToMapServer(val accountId: Int, val charId: Int, val loginId: Int, val clientTick: Int, val sex: Int) : Packet(0x360) {
         override fun PacketFieldWriter.buildPacket() {
             byte4(accountId)
             byte4(charId)
@@ -94,10 +95,25 @@ object ToServer {
         }
     }
 
-    class Chat(val text: String) : Packet(0x8c) {
+    class Chat(val text: String) : Packet(0xf3) {
         override fun PacketFieldWriter.buildPacket() {
-            byte2(2 + 2 + text.length + 1)
-            string(text + 0.toChar())
+            byte2(2 + 2 + text.length)
+            string(text)
+        }
+    }
+
+    /// 018a <type>.W
+    /// type:
+    ///     0 = quit
+    class RequestDisconnection(val type: Int) : Packet(0x18a) {
+        override fun PacketFieldWriter.buildPacket() {
+            byte2(type)
+        }
+    }
+
+    class TickSend() : Packet(0x886) {
+        override fun PacketFieldWriter.buildPacket() {
+            byte4(Date().time.and(0xFF_FF_FF_FF).toInt())
         }
     }
 }

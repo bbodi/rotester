@@ -6,6 +6,8 @@ import kotlinx.coroutines.experimental.channels.ReceiveChannel
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.produce
 import org.apache.commons.io.FileUtils
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.InetSocketAddress
 import java.nio.BufferUnderflowException
@@ -55,13 +57,17 @@ suspend fun connect(host: String, port: Int): Connection {
                         asynchronousSocketChannel.write(ByteBuffer.wrap(data))
                     }
                 }
-                continuation.resume(Connection(incomingDataProducer, outgoingDataChannel))
+                continuation.resume(Connection(incomingDataProducer, outgoingDataChannel, asynchronousSocketChannel))
             }
         })
     }
 }
 
-data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val outgoingDataChannel: SendChannel<ByteArray>) {
+data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val outgoingDataChannel: SendChannel<ByteArray>,
+                      private val asynchronousSocketChannel: AsynchronousSocketChannel) {
+
+    private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
+
     private val outgoingBuffer = ByteBuffer.allocate(1024)
     private val incomingBuffer = ByteBuffer.allocate(1024)
     private var startOfFirstUnprocessedByte = 0
@@ -72,25 +78,31 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
         incomingBuffer.order(ByteOrder.LITTLE_ENDIAN)
     }
 
+    fun close() {
+        asynchronousSocketChannel.close()
+    }
+
     fun fill(packet: ToServer.Packet) {
         packet.write(outgoingBuffer)
+        logger.trace("[SendBuffer] ${outgoingBuffer.position()}/${outgoingBuffer.capacity()}")
     }
 
     suspend fun send() {
         outgoingBuffer.flip()
         val sendingBytes = ByteArray(outgoingBuffer.remaining())
-        println("Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
+        logger.trace("Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
         outgoingBuffer.get(sendingBytes, outgoingBuffer.position(), outgoingBuffer.limit())
         outgoingDataChannel.send(sendingBytes)
         outgoingBuffer.clear()
     }
 
-    fun readIncomingBytes(dstBuffer: ByteBuffer, receiveChannel: ReceiveChannel<ByteArray>) {
+    private fun readIncomingBytes(dstBuffer: ByteBuffer, receiveChannel: ReceiveChannel<ByteArray>) {
         val receivedBytes = receiveChannel.poll()
         if (receivedBytes != null) {
             val buf = ByteBuffer.wrap(receivedBytes)
             require(dstBuffer.remaining() >= receivedBytes.size)
             buf.order(ByteOrder.LITTLE_ENDIAN)
+            logger.trace("Incoming data: {}", toHexDump(buf.duplicate(), 0, receivedBytes.size))
             dstBuffer.put(buf)
         }
     }
@@ -132,8 +144,8 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                         } else {
                             incomingBuffer.position(startOfFirstUnprocessedByte)
                             val remainingBytesAsString = toHexDump(incomingBuffer.duplicate(), beginOfPacketPos, indexOfLastIncomingByte)
-                            println("Unknown packet\n$remainingBytesAsString")
-                            println("Packets in buffer: ${incomingPackets.joinToString("\n    ")}")
+                            logger.error("Unknown packet\n$remainingBytesAsString")
+                            logger.error("Packets in buffer: ${incomingPackets.joinToString("\n    ")}")
                             run = false
                             continuation.resumeWithException(IllegalStateException("Unknown packet: " + remainingBytesAsString))
                         }
@@ -209,9 +221,11 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                     val currentPosition = incomingBuffer.position()
                     val newPosition = beginOfPacketPos + packerDescr.second
                     if (currentPosition > newPosition) {
-                        error("more bytes were read ($currentPosition) than the static Size would suggest ($newPosition)")
+                        error("$incomingPacket: more bytes were read ($currentPosition) than the static size would suggest ($newPosition)")
                     }
                     incomingBuffer.position(newPosition)
+                } else {
+                    logger.trace("Incoming Packet [$incomingPacket] - [${incomingBuffer.position() - beginOfPacketPos} bytes]")
                 }
                 startOfFirstUnprocessedByte = incomingBuffer.position()
                 incomingPacket
