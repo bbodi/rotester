@@ -1,19 +1,33 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
-import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
 import java.util.*
 
+enum class TestLockGranularity {
+    Global,
+    Map
+}
 
-class PlayerActor(private val username: String, private val password: String, gmActorChannel: SendChannel<GmActorMessage>) {
+data class TestCase(val scenarioDescription: String,
+                    val lockGranularity: TestLockGranularity = TestLockGranularity.Map,
+                    val testLogic: suspend (ROClient, TestDirectorCommunicator) -> Unit) {
 
+}
+
+
+data class ClientState(val mapName: String, val pos: Pos, val charName: String)
+
+class PlayerActor(private val username: String,
+                  private val password: String,
+                  gmActorChannel: SendChannel<GmActorMessage>?,
+                  logic: suspend (ClientState, PacketArrivalVerifier, Session) -> Unit
+) {
 
     val actor = actor<GmActorMessage>(CommonPool) {
-        var mapName: String = ""
-        var pos: Pos = Pos(0, 0, 0)
+        var clientState: ClientState = ClientState("", Pos(0, 0, 0), "")
 
         try {
             val loginResponse = login(username, password)
@@ -21,8 +35,8 @@ class PlayerActor(private val username: String, private val password: String, gm
             val charServerIp = toIpString(loginResponse.charServerDatas[0].ip)
 
             val (mapData, charName) = connectToCharServerAndSelectChar(charServerIp, loginResponse, 0)
-            mapName = mapData.mapName
-            Session(connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
+            clientState = clientState.copy(mapName = mapData.mapName)
+            Session("PlayerActor - mapSession", connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
                 println("connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
                 val packetArrivalVerifier = PacketArrivalVerifier()
                 mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
@@ -40,12 +54,13 @@ class PlayerActor(private val username: String, private val password: String, gm
                     println("blId: $blId")
                 }
                 packetArrivalVerifier.inCaseOf(FromServer.MapAuthOk::class, 5000) { p ->
-                    pos = p.pos
+                    clientState = clientState.copy(pos = p.pos)
                 }
                 val changeMapPacket = packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
                 mapSession.send(ToServer.LoadEndAck())
                 packetArrivalVerifier.waitForPacket(FromServer.EquipCheckbox::class, 5000)
-                gmActorChannel.send(SpawnMonster("pupa", mapName.dropLast(4), pos.x, pos.y, 1))
+//                gmActorChannel.send(SpawnMonster("pupa", mapName.dropLast(4), pos.x, pos.y, 1))
+//                gmActorChannel?.send(TakeMeTo(charName, "prontera", 100, 100))
                 // changeMapPacket.pos.x, changeMapPacket.pos.y-1
                 // 84 lefele van a 85hoy kepest$
                 var (x, y) = changeMapPacket.x to changeMapPacket.y
@@ -60,7 +75,7 @@ class PlayerActor(private val username: String, private val password: String, gm
                 }
                 packetArrivalVerifier.cleanPacketHistory()
                 mapSession.send(ToServer.Chat("$charName : Hello World!"))
-                mapSession.send(ToServer.Chat("$charName : ($mapName): ${pos.x}, ${pos.y}"))
+                mapSession.send(ToServer.Chat("$charName : (${clientState.mapName}): ${clientState.pos.x}, ${clientState.pos.y}"))
             }
         } catch (e: Exception) {
             e.printStackTrace()

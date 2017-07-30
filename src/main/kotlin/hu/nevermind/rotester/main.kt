@@ -14,9 +14,28 @@ fun main(args: Array<String>) = runBlocking {
     //    val socketChannel = SocketChannel.open()
     val jobs = List(1) { index ->
         launch(CommonPool) {
-            val gmActor = GmActor("gmgm", "gmgm")
-//            val player = PlayerActor("bot1", "bot1", gmActor.actor.channel)
-            gmActor.actor.join()
+            val testDirector = TestDirector(
+                    listOf(GmActor("gmgm", "gmgm")),
+                    listOf(TestDirector.MapPos("prontera", 100, 100))
+            )
+            testDirector.actor.send(LoginToMap("bot1", "bot1"))
+            testDirector.actor.send(StartTest(TestCase("") { roClient, testDirector ->
+                testDirector.warpMeToEmptyMap(roClient.clientState.charName, roClient.mapSession, roClient.packetArrivalVerifier)
+                roClient.packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { p ->
+                    p.msg == "${roClient.clientState.charName} : Warp works ^^"
+                }
+//        var (x, y) = clientState.pos.x to clientState.pos.y
+//        var yDir = -1
+//        (0 until 1).forEach { walkCount ->
+//            mapSession.send(ToServer.WalkTo(x, y + yDir))
+//            packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
+//            y += yDir
+//            yDir *= -1
+//            println("$walkCount ok ;)")
+//            delay(1000)
+//        }
+            }))
+            testDirector.actor.join()
         }
     }
     jobs.forEach { it.join() }
@@ -33,7 +52,7 @@ fun toIpString(ip: Int): String {
 }
 
 suspend fun connectToCharServerAndSelectChar(charServerIp: String, loginResponse: FromServer.LoginSucceedResponsePacket, charIndex: Int): Pair<FromServer.MapServerData, String> {
-    Session(connect(charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
+    Session("charSession", connect(charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
         val packetArrivalVerifier = PacketArrivalVerifier()
         charSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
         charSession.send(ToServer.CharServerInit(
@@ -59,7 +78,7 @@ suspend fun connectToCharServerAndSelectChar(charServerIp: String, loginResponse
 }
 
 suspend fun login(username: String, password: String): FromServer.LoginSucceedResponsePacket {
-    val loginSession = Session(connect("localhost", 6900))
+    val loginSession = Session("loginSession", connect("localhost", 6900))
     loginSession.asyncStartProcessingIncomingPackets()
     val packetArrivalVerifier = PacketArrivalVerifier()
     loginSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)

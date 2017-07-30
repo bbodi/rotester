@@ -1,10 +1,12 @@
 package hu.nevermind.rotester
 
-import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.channels.Channel
 import kotlinx.coroutines.experimental.channels.ReceiveChannel
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.produce
+import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.launch
 import org.apache.commons.io.FileUtils
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -52,7 +54,7 @@ suspend fun connect(host: String, port: Int): Connection {
                 }
 
                 val outgoingDataChannel = Channel<ByteArray>()
-                async(CommonPool) {
+                launch(CommonPool) {
                     for (data in outgoingDataChannel) {
                         asynchronousSocketChannel.write(ByteBuffer.wrap(data))
                     }
@@ -90,7 +92,9 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
     suspend fun send() {
         outgoingBuffer.flip()
         val sendingBytes = ByteArray(outgoingBuffer.remaining())
-        logger.trace("Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
+        if (logger.isTraceEnabled) {
+            logger.trace("Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
+        }
         outgoingBuffer.get(sendingBytes, outgoingBuffer.position(), outgoingBuffer.limit())
         outgoingDataChannel.send(sendingBytes)
         outgoingBuffer.clear()
@@ -102,7 +106,9 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
             val buf = ByteBuffer.wrap(receivedBytes)
             require(dstBuffer.remaining() >= receivedBytes.size)
             buf.order(ByteOrder.LITTLE_ENDIAN)
-            logger.trace("Incoming data: {}", toHexDump(buf.duplicate(), 0, receivedBytes.size))
+            if (logger.isTraceEnabled) {
+                logger.trace("Incoming data: {}", toHexDump(buf.duplicate(), 0, receivedBytes.size))
+            }
             dstBuffer.put(buf)
         }
     }
@@ -118,7 +124,7 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
 
     suspend fun readPackets(): List<FromServer.Packet> {
         return suspendCoroutine<List<FromServer.Packet>> { continuation ->
-            async(CommonPool) {
+            launch(CommonPool) {
                 val incomingPackets = arrayListOf<FromServer.Packet>()
                 try {
                     var run = true
@@ -130,11 +136,11 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                         }
                         val beginOfPacketPos = incomingBuffer.position()
                         val header = incomingBuffer.short.toInt()
-                        val packerDescr = FromServer.PACKETS.firstOrNull {
+                        val packetDescr = FromServer.PACKETS.firstOrNull {
                             header == it.first
                         }
-                        if (packerDescr != null) {
-                            val incomingPacket = tryReadPacket(packerDescr, beginOfPacketPos)
+                        if (packetDescr != null) {
+                            val incomingPacket = tryReadPacket(packetDescr, beginOfPacketPos)
                             if (incomingPacket != null) {
                                 incomingPackets.add(incomingPacket)
                             } else {

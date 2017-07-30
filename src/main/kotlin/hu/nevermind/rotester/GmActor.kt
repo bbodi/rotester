@@ -1,9 +1,9 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
-import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.launch
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -11,6 +11,7 @@ import java.util.*
 sealed class GmActorMessage()
 class SendHeartbeat : GmActorMessage()
 data class SpawnMonster(val monsterName: String, val dstMapName: String, val dstX: Int, val dstY: Int, val monsterCount: Int = 1) : GmActorMessage()
+data class TakeMeTo(val charName: String, val dstMapName: String, val dstX: Int, val dstY: Int) : GmActorMessage()
 
 class GmActor(private val username: String, private val password: String) {
 
@@ -27,7 +28,7 @@ class GmActor(private val username: String, private val password: String) {
 
             val (mapData, charName) = connectToCharServerAndSelectChar(charServerIp, loginResponse, 0)
             mapName = mapData.mapName
-            Session(connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
+            Session("GM - mapSession", connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
                 logger.info("$username connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
                 val packetArrivalVerifier = PacketArrivalVerifier()
                 mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
@@ -48,7 +49,7 @@ class GmActor(private val username: String, private val password: String) {
                 mapSession.send(ToServer.LoadEndAck())
                 val changeMapPacket = packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
                 packetArrivalVerifier.waitForPacket(FromServer.EquipCheckbox::class, 5000)
-                async(CommonPool) {
+                launch(CommonPool) {
                     while (true) {
                         this@actor.channel.send(SendHeartbeat())
                         delay(5000)
@@ -75,6 +76,21 @@ class GmActor(private val username: String, private val password: String) {
                             packetArrivalVerifier.waitForPacket(FromServer.NotifyTime::class, 5000)
                             val end = Date().time
                             logger.debug("$username ping: ${end - start} ms")
+                        }
+                        is TakeMeTo -> {
+                            // @where Bot1
+                            // prontera 201 292
+                            // ha ez a cel koordinata, akkor nem kell se warp se recall
+                            // kuldj egy whispert siker esetén a botnak, és a bot ezt a whispert figyelje validációként
+                            mapSession.send(ToServer.Chat("$charName : @warp ${msg.dstMapName} ${msg.dstX} ${msg.dstY}"))
+                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
+                                packet.msg == "Warped."
+                            }
+                            mapSession.send(ToServer.LoadEndAck())
+                            mapSession.send(ToServer.Chat("$charName : @recall ${msg.charName}"))
+                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
+                                packet.msg == "${msg.charName} recalled!"
+                            }
                         }
                     }
                 }
