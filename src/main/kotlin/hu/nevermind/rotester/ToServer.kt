@@ -102,6 +102,14 @@ object ToServer {
         }
     }
 
+    class Whisper(val targetName: String, val text: String) : Packet(0x96) {
+        override fun PacketFieldWriter.buildPacket() {
+            byte2(2 + 2 + 24 + text.length)
+            string(targetName, 24)
+            string(text)
+        }
+    }
+
     /// 018a <type>.W
     /// type:
     ///     0 = quit

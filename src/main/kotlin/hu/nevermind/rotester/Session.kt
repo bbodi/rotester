@@ -28,7 +28,6 @@ class PacketArrivalVerifier() {
         val responseChannel = Channel<FromServer.Packet>()
         var ok = false
         return async(CommonPool) {
-
             logger.trace("waiting for $expectedPacketClass${if (predicate!= null) "[with predicate]" else ""}")
             actor.send(IncaseOfPacketMessage(expectedPacketClass as KClass<FromServer.Packet>, timeout,
                     timeoutAction = {

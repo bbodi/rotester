@@ -20,9 +20,34 @@ fun main(args: Array<String>) = runBlocking {
             )
             testDirector.actor.send(LoginToMap("bot1", "bot1"))
             testDirector.actor.send(StartTest(TestCase("") { roClient, testDirector ->
-                testDirector.warpMeToEmptyMap(roClient.clientState.charName, roClient.mapSession, roClient.packetArrivalVerifier)
-                roClient.packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { p ->
-                    p.msg == "${roClient.clientState.charName} : Warp works ^^"
+                roClient.packetArrivalVerifier.cleanPacketHistory()
+                testDirector.warpMeTo(
+                        "prontera", 100, 101,
+                        roClient.clientState.charName,
+                        roClient.mapSession,
+                        roClient.packetArrivalVerifier)
+
+                roClient.packetArrivalVerifier.cleanPacketHistory()
+                testDirector.warpMeTo(
+                        "geffen", 154, 54,
+                        roClient.clientState.charName,
+                        roClient.mapSession,
+                        roClient.packetArrivalVerifier)
+                roClient.packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000).apply {
+                    require(mapName == "geffen.gat")
+                    require(x == 154)
+                    require(y == 54)
+                }
+
+                testDirector.warpMeTo(
+                        "prontera", 100, 101,
+                        roClient.clientState.charName,
+                        roClient.mapSession,
+                        roClient.packetArrivalVerifier)
+                roClient.packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000).apply {
+                    require(mapName == "prontera.gat")
+                    require(x == 100)
+                    require(y == 101)
                 }
 //        var (x, y) = clientState.pos.x to clientState.pos.y
 //        var yDir = -1

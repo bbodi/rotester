@@ -295,6 +295,38 @@ object FromServer {
         }
     }
 
+    data class NotifyPlayerWhisperChat(val from: String, val isAdmin: Boolean, val msg: String) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> NotifyPlayerWhisperChat? = {
+                val payloadLength = byte2()
+                val msgLen = payloadLength - 24 - 8
+                FromServer.NotifyPlayerWhisperChat(
+                        from = string(24),
+                        isAdmin = byte4() != 0,
+                        msg = string(msgLen)
+                )
+            }
+        }
+    }
+
+    enum class WhisperResult {
+        Success,
+        TargetCharIsNotLoggedIn,
+        IgnoredByPlayer,
+        EveryIsIgnoredByPlayer
+    }
+
+    data class WhisperResultPacket(val result: WhisperResult, val charId: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> WhisperResultPacket? = {
+                FromServer.WhisperResultPacket(
+                        result = WhisperResult.values()[byte1()],
+                        charId = byte4()
+                )
+            }
+        }
+    }
+
     data class ChangeMap(val mapName: String, val x: Int, val y: Int) : Packet {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> ChangeMap? = {
@@ -807,6 +839,99 @@ object FromServer {
         }
     }
 
+    data class UnitWalking(
+            val blType: Int,
+            val payloadLength: Int,
+            val blId: Int,
+            val charId: Int,
+            val speed: Int,
+            val statusChangeOpt1: Int,
+            val statusChangeOpt2: Int,
+            val statusChangeOption: Int,
+            val viewDataClass: Int,
+            val viewDataHairStyle: Int,
+            val viewDataWeapon: Int,
+            val viewDataShield: Int,
+            val viewDataHeadBottom: Int,
+            val viewDataHeadTop: Int,
+            val viewDataHeadMid: Int,
+            val tick: Int,
+            val viewDataHairColor: Int,
+            val viewDataClothColor: Int,
+            val viewDataHeadDir: Int,
+            val viewDataRobe: Int,
+            val guildId: Int,
+            val emblemId: Int,
+            val manner: Int,
+            val statusChangeOpt3: Int,
+            val karma: Int,
+            val viewDataSex: Int,
+            val pos: PosChange,
+
+            val level: Int,
+            val font: Int,
+            val maxHp: Int,
+            val hp: Int,
+            val isBoss: Boolean,
+            val viewDataBodyStyle: Int,
+            val name: String
+    ) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> UnitWalking? = {
+                // WBUFW(buf, 2) = (uint16)(86+strlen(name));
+                val payloadLength = byte2()
+                val blType = byte1()
+                val blId = byte4()
+                val charId = byte4()
+                val speed = byte2()
+                val statusChangeOpt1 = byte2()
+                val statusChangeOpt2 = byte2()
+                val statusChangeOption = byte4()
+                val viewDataClass = byte2()
+                val viewDataHairStyle = byte2()
+                val viewDataWeapon = byte2()
+                val viewDataShield = byte2()
+                val viewDataHeadBottom = byte2()
+                val tick = byte4()
+                val viewDataHeadTop = byte2()
+                val viewDataHeadMid = byte2()
+                val viewDataHairColor = byte2()
+                val viewDataClothColor = byte2()
+                val viewDataHeadDir = byte2()
+                val viewDataRobe = byte2()
+                val guildId = byte4()
+                val emblemId = byte2()
+                val manner = byte2()
+                val statusChangeOpt3 = byte4()
+                val karma = byte1()
+                val viewDataSex = byte1()
+                val pos = positionChange()
+                //WBUFB(buf,56) = (sd)? 5 : 0;
+                //WBUFB(buf,57) = (sd)? 5 : 0;
+                val unk1 = byte1() // xsize?
+                val unk2 = byte1() // ysize?
+                val level = byte2()
+                val font = byte2()
+                val maxHp = byte4()
+                val hp = byte4()
+                val isBoss = byte1() == 1
+                val viewDataBodyStyle = byte2()
+                val name = string(payloadLength - readBytes - 2)
+                val ret = UnitWalking(
+                        blType, payloadLength, blId, charId, speed,
+                        statusChangeOpt1, statusChangeOpt2, statusChangeOption,
+                        viewDataClass, viewDataHairStyle, viewDataWeapon, viewDataShield, viewDataHeadBottom, tick, viewDataHeadTop,
+                        viewDataHeadMid,
+                        viewDataHairColor, viewDataClothColor, viewDataHeadDir, viewDataRobe, guildId, emblemId,
+                        manner, statusChangeOpt3, karma, viewDataSex, pos, level, font, maxHp,
+                        hp, isBoss, viewDataBodyStyle, name
+                )
+                setReadingByteCountsAfterHeaderIsAlreadyRead(payloadLength - 2)
+                ret
+            }
+        }
+    }
+
 
     data class NotifyTime(val serverTime: Long) : Packet {
         companion object {
@@ -988,6 +1113,8 @@ object FromServer {
             Triple(0x283, 2 + 4, ConnectToMapServerResponse.reader),
             Triple(0xa18, 14, MapAuthOk.reader),
             Triple(0x8e, 0, NotifyPlayerChat.reader),
+            Triple(0x97, 0, NotifyPlayerWhisperChat.reader),
+            Triple(0x9df, 0, WhisperResultPacket.reader),
             Triple(0x91, 0, ChangeMap.reader),
             Triple(0xb0, 8, UpdateStatus_b0.reader),
             Triple(0xb1, 8, UpdateStatus_b1.reader),
@@ -1018,6 +1145,7 @@ object FromServer {
             Triple(0x99b, 8, SetMapProperty.reader),
             Triple(0x9ff, 0, InitializeIdleOrSpawningUnit.forIdleUnit),
             Triple(0x9fe, 0, InitializeIdleOrSpawningUnit.forSpawnUnit),
+            Triple(0x9fd, 0, UnitWalking.reader),
             Triple(0xa0d, 0, InventoryList.reader),
             Triple(0x991, 0, InventoryList.reader),
             Triple(0x7f, 6, NotifyTime.reader)

@@ -12,7 +12,12 @@ import java.util.*
 
 sealed class TestDirectorMessage()
 data class StartTest(val testCase: TestCase) : TestDirectorMessage()
-data class WarpChar(val sourceTestCase: TestCase, val charName: String, val dstMapName: String?, val dstX: Int = 0, val dstY: Int = 0) : TestDirectorMessage()
+data class MyGmHasFinishedHerJob(val testCase: TestCase) : TestDirectorMessage()
+data class WarpChar(val sourceTestCase: TestCase,
+                    val charName: String,
+                    val dstMapName: String?,
+                    val dstX: Int = 0,
+                    val dstY: Int = 0) : TestDirectorMessage()
 data class LockMap(val sourceTestCase: TestCase, val mapName: String) : TestDirectorMessage()
 data class TestFailed(val sourceTestCase: TestCase, val failureReason: FailureReason) : TestDirectorMessage()
 data class LoginToMap(val username: String, val password: String) : TestDirectorMessage()
@@ -44,6 +49,7 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
             }
         }
         val freeGMList = gmActors.toMutableList()
+        val gmsOccupiedByTestCases = hashMapOf<TestCase, GmActor>()
         var freeEmptyMapList = emptyMaps.toMutableList()
         val freeROClients = arrayListOf<ROClient>()
         val runningTests = arrayListOf<String>()
@@ -102,13 +108,14 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                         continue@actorChannelLoop
                     }
                     val gm = freeGMList.removeAt(0)
+                    gmsOccupiedByTestCases.put(msg.sourceTestCase, gm)
                     if (msg.dstMapName == null && freeEmptyMapList.isEmpty()) {
                         this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeMap()))
                         continue@actorChannelLoop
                     }
                     val (dstMapname, dstX, dstY) = if (msg.dstMapName == null) {
                         val dstMap = freeEmptyMapList.removeAt(0)
-                        Triple(dstMap.mapName, dstMap.x,  dstMap.y)
+                        Triple(dstMap.mapName, dstMap.x, dstMap.y)
                     } else {
                         Triple(msg.dstMapName, msg.dstX, msg.dstY)
                     }
@@ -116,6 +123,10 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                 }
                 is TestFailed -> {
                     logger.error("${msg.sourceTestCase.scenarioDescription} FAILED: ${msg.failureReason}")
+                    val gm = gmsOccupiedByTestCases.remove(msg.sourceTestCase)
+                    if (gm != null) {
+                        freeGMList.add(gm)
+                    }
                     when (msg.failureReason) {
                         is NoFreeMap -> {
                             launch(CommonPool) {
@@ -148,6 +159,14 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                         }
                     }
                 }
+                is MyGmHasFinishedHerJob -> {
+                    val gm = gmsOccupiedByTestCases.remove(msg.testCase)
+                    if (gm == null) {
+                        logger.error("MyGmHasFinishedHerJob message arrived for ${msg.testCase.scenarioDescription} but no GM occupied by this test!")
+                        continue@actorChannelLoop
+                    }
+                    freeGMList.add(gm)
+                }
             }
         }
     }
@@ -156,9 +175,16 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
 class TestDirectorCommunicator(val testCase: TestCase,
                                val testDirectorChannel: Channel<TestDirectorMessage>) {
     suspend fun warpMeToEmptyMap(charName: String, mapSession: Session, packetArrivalVerifier: PacketArrivalVerifier) {
-        testDirectorChannel.send(WarpChar(testCase, charName, null, 0, 0))
+        warpMeTo(null, 0, 0, charName, mapSession, packetArrivalVerifier)
+    }
+
+    suspend fun warpMeTo(dstMapName: String?, dstX: Int, dstY: Int, charName: String, mapSession: Session, packetArrivalVerifier: PacketArrivalVerifier) {
+        testDirectorChannel.send(WarpChar(testCase, charName, dstMapName, dstX, dstY))
         try {
-            packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000)
+            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 5000) { packet ->
+                packet.msg == "Done"
+            }
+            testDirectorChannel.send(MyGmHasFinishedHerJob(testCase))
             mapSession.send(ToServer.LoadEndAck())
         } catch (e: CancellationException) {
             logger.error("warpMeToEmptyMap", e)

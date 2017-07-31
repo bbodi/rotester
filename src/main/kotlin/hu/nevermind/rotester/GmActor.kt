@@ -1,6 +1,7 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.channels.Channel
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
 import kotlinx.coroutines.experimental.launch
@@ -11,7 +12,10 @@ import java.util.*
 sealed class GmActorMessage()
 class SendHeartbeat : GmActorMessage()
 data class SpawnMonster(val monsterName: String, val dstMapName: String, val dstX: Int, val dstY: Int, val monsterCount: Int = 1) : GmActorMessage()
-data class TakeMeTo(val charName: String, val dstMapName: String, val dstX: Int, val dstY: Int) : GmActorMessage()
+data class TakeMeTo(val charName: String,
+                    val dstMapName: String,
+                    val dstX: Int,
+                    val dstY: Int) : GmActorMessage()
 
 class GmActor(private val username: String, private val password: String) {
 
@@ -78,18 +82,27 @@ class GmActor(private val username: String, private val password: String) {
                             logger.debug("$username ping: ${end - start} ms")
                         }
                         is TakeMeTo -> {
-                            // @where Bot1
-                            // prontera 201 292
-                            // ha ez a cel koordinata, akkor nem kell se warp se recall
-                            // kuldj egy whispert siker esetén a botnak, és a bot ezt a whispert figyelje validációként
-                            mapSession.send(ToServer.Chat("$charName : @warp ${msg.dstMapName} ${msg.dstX} ${msg.dstY}"))
-                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
-                                packet.msg == "Warped."
-                            }
-                            mapSession.send(ToServer.LoadEndAck())
-                            mapSession.send(ToServer.Chat("$charName : @recall ${msg.charName}"))
-                            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
-                                packet.msg == "${msg.charName} recalled!"
+                            mapSession.send(ToServer.Chat("$charName : @where ${msg.charName}"))
+                            val pos = packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
+                                !packet.msg.contains(':')
+                            }.msg.split(" ")
+                            if (pos[1] == msg.dstMapName && pos[2].toInt() == msg.dstX && pos[3].toInt() == msg.dstY) {
+                                mapSession.send(ToServer.Whisper(msg.charName, "Done"))
+                                val whisperResult = packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 5000)
+                                require(whisperResult.result == FromServer.WhisperResult.Success )
+                            } else {
+                                mapSession.send(ToServer.Chat("$charName : @warp ${msg.dstMapName} ${msg.dstX} ${msg.dstY}"))
+                                packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
+                                    packet.msg == "Warped."
+                                }
+                                mapSession.send(ToServer.LoadEndAck())
+                                mapSession.send(ToServer.Chat("$charName : @recall ${msg.charName}"))
+                                packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
+                                    packet.msg == "${msg.charName} recalled!"
+                                }
+                                mapSession.send(ToServer.Whisper(msg.charName, "Done"))
+                                val whisperResult = packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 5000)
+                                require(whisperResult.result == FromServer.WhisperResult.Success )
                             }
                         }
                     }
