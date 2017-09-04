@@ -18,8 +18,28 @@ fun main(args: Array<String>) = runBlocking {
                     listOf(GmActor("gmgm", "gmgm")),
                     listOf(TestDirector.MapPos("prontera", 100, 100))
             )
-            testDirector.actor.send(LoginToMap("bot1", "bot1"))
-            testDirector.actor.send(StartTest(TestCase("") { roClient, testDirector ->
+            (1..3).forEach {
+                testDirector.actor.send(LoginToMap("bot$it", "bot$it"))
+            }
+            testDirector.actor.send(StartTest(TestCase("Whisper must work") { whisperSenderClient, testDirector ->
+                val whisperReceiverClient = testDirector.requestRoClient()
+
+                whisperSenderClient.mapSession.send(ToServer.Whisper(whisperReceiverClient.clientState.charName, "Do you get it? o-O"))
+                val whisperResult = whisperSenderClient.packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 1000)
+                require(whisperResult.result == FromServer.WhisperResult.Success)
+                whisperReceiverClient.packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 1000) { packet ->
+                    packet.msg == "Do you get it? o-O"
+                }
+
+                whisperReceiverClient.mapSession.send(ToServer.Whisper(whisperSenderClient.clientState.charName, "Sure!"))
+                val whisperResponseResult = whisperReceiverClient.packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 1000)
+                require(whisperResponseResult.result == FromServer.WhisperResult.Success)
+                whisperSenderClient.packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 1000) { packet ->
+                    packet.msg == "Sure!"
+                }
+                testDirector.succeed()
+            }))
+            testDirector.actor.send(StartTest(TestCase("GM commands (@where, @warp, @recall) for warping a character should work for most of the tests") { roClient, testDirector ->
                 roClient.packetArrivalVerifier.cleanPacketHistory()
                 testDirector.warpMeTo(
                         "prontera", 100, 101,
@@ -49,6 +69,7 @@ fun main(args: Array<String>) = runBlocking {
                     require(x == 100)
                     require(y == 101)
                 }
+                testDirector.succeed()
 //        var (x, y) = clientState.pos.x to clientState.pos.y
 //        var yDir = -1
 //        (0 until 1).forEach { walkCount ->
