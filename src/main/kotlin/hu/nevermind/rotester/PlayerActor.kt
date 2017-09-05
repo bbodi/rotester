@@ -13,7 +13,7 @@ enum class TestLockGranularity {
 
 data class TestCase(val scenarioDescription: String,
                     val lockGranularity: TestLockGranularity = TestLockGranularity.Map,
-                    val testLogic: suspend (ROClient, TestDirectorCommunicator) -> Unit) {
+                    val testLogic: suspend (TestDirectorCommunicator) -> Unit) {
 
 }
 

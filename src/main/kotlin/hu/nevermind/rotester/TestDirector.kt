@@ -32,7 +32,7 @@ class NoFreeMap : FailureReason()
 class NoFreeGM : FailureReason()
 data class ExpectationFails(val reason: String) : FailureReason()
 
-data class TestMetadata(val testCase: TestCase, val tryCount: Int, val failureReasons: List<FailureReason>)
+data class TestMetadata(val testCase: TestCase, val tryCount: Int, val failureReasons: List<FailureReason>, val startTime: Long, val endTime: Long)
 
 data class ROClient(val clientState: ClientState, val mapSession: Session, val packetArrivalVerifier: PacketArrivalVerifier)
 
@@ -41,7 +41,6 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
     data class MapPos(val mapName: String, val x: Int, val y: Int)
 
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
-    private val tests: List<TestMetadata> = emptyList()
 
 
     val actor = actor<TestDirectorMessage>(CommonPool) {
@@ -53,11 +52,13 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
         }
         val freeGMList = gmActors.toMutableList()
         val gmsOccupiedByTestCases = hashMapOf<TestCase, GmActor>()
-        val roCLientsOccupiedByTestCases = hashMapOf<TestCase, MutableList<ROClient>>()
-        var freeEmptyMapList = emptyMaps.toMutableList()
+        val roClientsOccupiedByTestCases = hashMapOf<TestCase, MutableList<ROClient>>()
+        val freeEmptyMapList = emptyMaps.toMutableList()
+        val runningTests: MutableList<TestMetadata> = arrayListOf()
+        val finishedTests: MutableList<TestMetadata> = arrayListOf()
         var maxRoClient = 0
         val freeROClients = arrayListOf<ROClient>()
-        val runningTests = arrayListOf<String>()
+
         actorChannelLoop@ for (msg in channel) {
             try {
                 when (msg) {
@@ -126,9 +127,44 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                         }
                         gm.actor.send(TakeMeTo(msg.charName, dstMapname, dstX, dstY))
                     }
+                    is StartTest -> {
+                        if (freeROClients.isEmpty()) {
+                            continue@actorChannelLoop
+                        }
+                        logger.debug("Starting test [${msg.testCase.scenarioDescription}], RoClients[${freeROClients.size}\\${maxRoClient}].")
+                        runningTests.add(TestMetadata(msg.testCase, 1, emptyList(), System.currentTimeMillis(), 0))
+                        launch(CommonPool) {
+                            try {
+                                msg.testCase.testLogic(
+                                        TestDirectorCommunicator(msg.testCase, this@actor.channel)
+                                )
+                            } catch (e: Exception) {
+                                logger.error(msg.testCase.scenarioDescription, e)
+                                this@actor.channel.send(TestFailed(msg.testCase, TestCaseError(e)))
+                            }
+                        }
+                    }
+                    is RequestRoCLient -> {
+                        // TODO if shit happens in any message from a test, the test should fail
+                        logger.debug("RoClients[${freeROClients.size - 1}\\${maxRoClient}] was requested by [${msg.testCase.scenarioDescription}].")
+                        val roClient = freeROClients.removeAt(0)
+                        roClientsOccupiedByTestCases.getOrPut(msg.testCase, { arrayListOf<ROClient>() }).add(roClient)
+                        roClient.packetArrivalVerifier.cleanPacketHistory()
+                        msg.answerChannel.send(roClient)
+                    }
+                    is TestSucceeded -> {
+                        measureTimeAndMoveMetadata(runningTests, finishedTests, msg.testCase)
+                        releaseGmsAndChars(gmsOccupiedByTestCases, freeGMList, roClientsOccupiedByTestCases, freeROClients, msg.testCase)
+                        logger.info("Test SUCCESSFUL: ${msg.testCase.scenarioDescription}")
+                        if (runningTests.isEmpty()) {
+                            logResults(finishedTests)
+                            return@actor
+                        }
+                    }
                     is TestFailed -> {
                         logger.error("${msg.sourceTestCase.scenarioDescription} FAILED: ${msg.failureReason}")
-                        releaseResources(gmsOccupiedByTestCases, freeGMList, roCLientsOccupiedByTestCases, freeROClients, msg.sourceTestCase)
+                        measureTimeAndMoveMetadata(runningTests, finishedTests, msg.sourceTestCase, msg.failureReason)
+                        releaseGmsAndChars(gmsOccupiedByTestCases, freeGMList, roClientsOccupiedByTestCases, freeROClients, msg.sourceTestCase)
                         when (msg.failureReason) {
                             is NoFreeMap -> {
                                 launch(CommonPool) {
@@ -143,37 +179,10 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                                 }
                             }
                         }
-                    }
-                    is StartTest -> {
-                        if (freeROClients.isEmpty()) {
-                            continue@actorChannelLoop
+                        if (runningTests.isEmpty()) {
+                            logResults(finishedTests)
+                            return@actor
                         }
-                        val roClient = freeROClients.removeAt(0)
-                        roClient.packetArrivalVerifier.cleanPacketHistory()
-                        roCLientsOccupiedByTestCases.put(msg.testCase, arrayListOf(roClient))
-                        logger.debug("Starting test [${msg.testCase.scenarioDescription}], RoClients[${freeROClients.size}\\${maxRoClient}].")
-                        launch(CommonPool) {
-                            try {
-                                msg.testCase.testLogic(
-                                        roClient,
-                                        TestDirectorCommunicator(msg.testCase, this@actor.channel)
-                                )
-                            } catch (e: Exception) {
-                                logger.error(msg.testCase.scenarioDescription, e)
-                                this@actor.channel.send(TestFailed(msg.testCase, TestCaseError(e)))
-                            }
-                        }
-                    }
-                    is RequestRoCLient -> {
-                        logger.debug("RoClients[${freeROClients.size-1}\\${maxRoClient}] was requested by [${msg.testCase.scenarioDescription}].")
-                        val roClient = freeROClients.removeAt(0)
-                        roCLientsOccupiedByTestCases[msg.testCase]!!.add(roClient)
-                        roClient.packetArrivalVerifier.cleanPacketHistory()
-                        msg.answerChannel.send(roClient)
-                    }
-                    is TestSucceeded -> {
-                        releaseResources(gmsOccupiedByTestCases, freeGMList, roCLientsOccupiedByTestCases, freeROClients, msg.testCase)
-                        logger.info("Test SUCCESSFUL: ${msg.testCase.scenarioDescription}")
                     }
                     is MyGmHasFinishedHerJob -> {
                         val gm = gmsOccupiedByTestCases.remove(msg.testCase)
@@ -190,7 +199,48 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
         }
     }
 
-    private fun releaseResources(gmsOccupiedByTestCases: MutableMap<TestCase, GmActor>, freeGMList: MutableList<GmActor>, roCLientsOccupiedByTestCases: MutableMap<TestCase, MutableList<ROClient>>, freeROClients: MutableList<ROClient>, testCase: TestCase) {
+    private fun logResults(finishedTests: MutableList<TestMetadata>) {
+        val sb = StringBuilder()
+        val nameColumnLength = 20
+        val durationColumnLength = 20
+        val resultLength = 20
+        sb.append("=\n".padStart(nameColumnLength + durationColumnLength + resultLength + "||||".length + 1, '='))
+        sb.append("|").append(alignCenter("Name", nameColumnLength)).append("|")
+        sb.append(alignCenter("Duration (ms)", durationColumnLength)).append("|")
+        sb.append(alignCenter("Result", resultLength)).append("|")
+        sb.append("\n=".padEnd(nameColumnLength + durationColumnLength + resultLength + "||||".length + 1, '='))
+        finishedTests.forEach { finishedTest ->
+            sb.append("\n|")
+            sb.append(finishedTest.testCase.scenarioDescription.take(nameColumnLength).padEnd(nameColumnLength))
+            sb.append("|")
+            sb.append(alignCenter("${finishedTest.endTime - finishedTest.startTime}", durationColumnLength))
+            sb.append("|")
+            sb.append(alignCenter(if (finishedTest.failureReasons.isNotEmpty()) finishedTest.failureReasons.last().toString() else "Success", resultLength))
+            sb.append("|")
+        }
+        sb.append("\n=".padEnd(nameColumnLength + durationColumnLength + resultLength + "||||".length + 1, '='))
+        logger.info("\n${sb.toString()}")
+    }
+
+    private fun alignCenter(text: String, columnLength: Int): String {
+        val txtLen = text.length
+        val paddingSpaceCount = (columnLength - txtLen) / 2
+        return text.take(columnLength).padStart(paddingSpaceCount + txtLen).padEnd(maxOf(columnLength, paddingSpaceCount + txtLen + paddingSpaceCount))
+    }
+
+    private fun measureTimeAndMoveMetadata(runningTests: MutableList<TestMetadata>,
+                                           finishedTests: MutableList<TestMetadata>,
+                                           testCase: TestCase,
+                                           failureReason: FailureReason? = null) {
+        val testMetadata = runningTests.find { it.testCase == testCase }!!
+        runningTests.remove(testMetadata)
+        finishedTests.add(testMetadata.copy(
+                endTime = System.currentTimeMillis(),
+                failureReasons = if (failureReason != null) testMetadata.failureReasons + failureReason else testMetadata.failureReasons
+        ))
+    }
+
+    private fun releaseGmsAndChars(gmsOccupiedByTestCases: MutableMap<TestCase, GmActor>, freeGMList: MutableList<GmActor>, roCLientsOccupiedByTestCases: MutableMap<TestCase, MutableList<ROClient>>, freeROClients: MutableList<ROClient>, testCase: TestCase) {
         val gm = gmsOccupiedByTestCases.remove(testCase)
         if (gm != null) {
             freeGMList.add(gm)

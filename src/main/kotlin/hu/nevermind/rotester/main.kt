@@ -1,5 +1,7 @@
 package hu.nevermind.rotester
 
+import hu.nevermind.rotester.test.WarpCommandTest
+import hu.nevermind.rotester.test.WhisperTest
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
@@ -8,6 +10,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 val logger = LoggerFactory.getLogger("global")
+
+fun <T> assertEquals(expected: T, actual: T) {
+    require(expected == actual) {"expected: $expected, but was $actual"}
+}
 
 fun main(args: Array<String>) = runBlocking {
 
@@ -21,66 +27,21 @@ fun main(args: Array<String>) = runBlocking {
             (1..3).forEach {
                 testDirector.actor.send(LoginToMap("bot$it", "bot$it"))
             }
-            testDirector.actor.send(StartTest(TestCase("Whisper must work") { whisperSenderClient, testDirector ->
-                val whisperReceiverClient = testDirector.requestRoClient()
 
-                whisperSenderClient.mapSession.send(ToServer.Whisper(whisperReceiverClient.clientState.charName, "Do you get it? o-O"))
-                val whisperResult = whisperSenderClient.packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 1000)
-                require(whisperResult.result == FromServer.WhisperResult.Success)
-                whisperReceiverClient.packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 1000) { packet ->
-                    packet.msg == "Do you get it? o-O"
-                }
+            WhisperTest.run(testDirector)
+            WarpCommandTest.run(testDirector)
 
-                whisperReceiverClient.mapSession.send(ToServer.Whisper(whisperSenderClient.clientState.charName, "Sure!"))
-                val whisperResponseResult = whisperReceiverClient.packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 1000)
-                require(whisperResponseResult.result == FromServer.WhisperResult.Success)
-                whisperSenderClient.packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 1000) { packet ->
-                    packet.msg == "Sure!"
-                }
-                testDirector.succeed()
-            }))
-            testDirector.actor.send(StartTest(TestCase("GM commands (@where, @warp, @recall) for warping a character should work for most of the tests") { roClient, testDirector ->
-                roClient.packetArrivalVerifier.cleanPacketHistory()
-                testDirector.warpMeTo(
-                        "prontera", 100, 101,
-                        roClient.clientState.charName,
-                        roClient.mapSession,
-                        roClient.packetArrivalVerifier)
-
-                roClient.packetArrivalVerifier.cleanPacketHistory()
-                testDirector.warpMeTo(
-                        "geffen", 154, 54,
-                        roClient.clientState.charName,
-                        roClient.mapSession,
-                        roClient.packetArrivalVerifier)
-                roClient.packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000).apply {
-                    require(mapName == "geffen.gat")
-                    require(x == 154)
-                    require(y == 54)
-                }
-
-                testDirector.warpMeTo(
-                        "prontera", 100, 101,
-                        roClient.clientState.charName,
-                        roClient.mapSession,
-                        roClient.packetArrivalVerifier)
-                roClient.packetArrivalVerifier.waitForPacket(FromServer.ChangeMap::class, 5000).apply {
-                    require(mapName == "prontera.gat")
-                    require(x == 100)
-                    require(y == 101)
-                }
-                testDirector.succeed()
-//        var (x, y) = clientState.pos.x to clientState.pos.y
-//        var yDir = -1
-//        (0 until 1).forEach { walkCount ->
-//            mapSession.send(ToServer.WalkTo(x, y + yDir))
-//            packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
-//            y += yDir
-//            yDir *= -1
-//            println("$walkCount ok ;)")
-//            delay(1000)
-//        }
-            }))
+////        var (x, y) = clientState.pos.x to clientState.pos.y
+////        var yDir = -1
+////        (0 until 1).forEach { walkCount ->
+////            mapSession.send(ToServer.WalkTo(x, y + yDir))
+////            packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
+////            y += yDir
+////            yDir *= -1
+////            println("$walkCount ok ;)")
+////            delay(1000)
+////        }
+//            }))
             testDirector.actor.join()
         }
     }

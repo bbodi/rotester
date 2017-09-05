@@ -1,7 +1,6 @@
 package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.CommonPool
-import kotlinx.coroutines.experimental.channels.Channel
 import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
 import kotlinx.coroutines.experimental.launch
@@ -89,7 +88,7 @@ class GmActor(private val username: String, private val password: String) {
                             if (pos[1] == msg.dstMapName && pos[2].toInt() == msg.dstX && pos[3].toInt() == msg.dstY) {
                                 mapSession.send(ToServer.Whisper(msg.charName, "Done"))
                                 val whisperResult = packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 5000)
-                                require(whisperResult.result == FromServer.WhisperResult.Success )
+                                require(whisperResult.result == FromServer.WhisperResult.Success)
                             } else {
                                 mapSession.send(ToServer.Chat("$charName : @warp ${msg.dstMapName} ${msg.dstX} ${msg.dstY}"))
                                 packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerChat::class, 5000) { packet ->
@@ -102,7 +101,7 @@ class GmActor(private val username: String, private val password: String) {
                                 }
                                 mapSession.send(ToServer.Whisper(msg.charName, "Done"))
                                 val whisperResult = packetArrivalVerifier.waitForPacket(FromServer.WhisperResultPacket::class, 5000)
-                                require(whisperResult.result == FromServer.WhisperResult.Success )
+                                require(whisperResult.result == FromServer.WhisperResult.Success)
                             }
                         }
                     }

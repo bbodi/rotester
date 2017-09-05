@@ -17,7 +17,7 @@ data class IncaseOfPacketMessage(val expectedPacketClass: KClass<FromServer.Pack
                                  val responseChannel: Channel<FromServer.Packet>,
                                  val predicate: ((FromServer.Packet)->Boolean)? = null) : IncomingPacketSubscriberMessage()
 
-class ClearHistory() : IncomingPacketSubscriberMessage()
+class ClearHistory(val responseChannel: Channel<Any>) : IncomingPacketSubscriberMessage()
 
 class PacketArrivalVerifier() {
 
@@ -46,7 +46,9 @@ class PacketArrivalVerifier() {
 
     suspend fun cleanPacketHistory() {
         logger.debug("cleaning packet history")
-        actor.send(ClearHistory())
+        val responseChannel = Channel<Any>()
+        actor.send(ClearHistory(responseChannel))
+        responseChannel.receive()
     }
 
     suspend fun <T> inCaseOf(expectedPacketClass: KClass<T>, timeout: Long = 5000, action: (T) -> Unit)
@@ -130,6 +132,7 @@ class PacketArrivalVerifier() {
                 }
                 is ClearHistory -> {
                     packetHistory.clear()
+                    msg.responseChannel.send("done")
                 }
             }
         }
