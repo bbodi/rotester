@@ -1,5 +1,51 @@
 package hu.nevermind.rotester
 
+import hu.nevermind.rotester.FromServer.BroadcastMessage.Companion.reader
+import hu.nevermind.rotester.FromServer.ChangeMap.Companion.reader
+import hu.nevermind.rotester.FromServer.CharListPages.Companion.reader
+import hu.nevermind.rotester.FromServer.CharSelectErrorResponse.Companion.reader
+import hu.nevermind.rotester.FromServer.CharWindow.Companion.reader
+import hu.nevermind.rotester.FromServer.CharacterList.Companion.reader
+import hu.nevermind.rotester.FromServer.ConnectToMapServerResponse.Companion.reader
+import hu.nevermind.rotester.FromServer.Emotion.Companion.reader
+import hu.nevermind.rotester.FromServer.EquipCheckbox.Companion.reader
+import hu.nevermind.rotester.FromServer.Hotkeys.Companion.reader
+import hu.nevermind.rotester.FromServer.HpBarUpdate.Companion.reader
+import hu.nevermind.rotester.FromServer.InitialStatus.Companion.reader
+import hu.nevermind.rotester.FromServer.InitializeIdleOrSpawningUnit.Companion.forIdleUnit
+import hu.nevermind.rotester.FromServer.InitializeIdleOrSpawningUnit.Companion.forSpawnUnit
+import hu.nevermind.rotester.FromServer.InventoryList.Companion.reader
+import hu.nevermind.rotester.FromServer.ItemDisappear.Companion.reader
+import hu.nevermind.rotester.FromServer.LoginFailResponsePacket.Companion.reader
+import hu.nevermind.rotester.FromServer.LoginSucceedResponsePacket.Companion.reader
+import hu.nevermind.rotester.FromServer.MakeUnitDisappear.Companion.reader
+import hu.nevermind.rotester.FromServer.MapAuthOk.Companion.reader
+import hu.nevermind.rotester.FromServer.MapServerData.Companion.reader
+import hu.nevermind.rotester.FromServer.NotifyChat.Companion.reader
+import hu.nevermind.rotester.FromServer.NotifyPlayerChat.Companion.reader
+import hu.nevermind.rotester.FromServer.NotifyPlayerWhisperChat.Companion.reader
+import hu.nevermind.rotester.FromServer.NotifySelfChat.Companion.reader
+import hu.nevermind.rotester.FromServer.NotifyTime.Companion.reader
+import hu.nevermind.rotester.FromServer.NpcSpriteChange.Companion.reader
+import hu.nevermind.rotester.FromServer.ObjectMove.Companion.reader
+import hu.nevermind.rotester.FromServer.PartyInvitationState.Companion.reader
+import hu.nevermind.rotester.FromServer.PincodeState.Companion.reader
+import hu.nevermind.rotester.FromServer.ResponseToDisconnectionRequest.Companion.reader
+import hu.nevermind.rotester.FromServer.ScriptClose.Companion.reader
+import hu.nevermind.rotester.FromServer.SetMapProperty.Companion.reader
+import hu.nevermind.rotester.FromServer.SpriteChange2.Companion.reader
+import hu.nevermind.rotester.FromServer.StopMove.Companion.reader
+import hu.nevermind.rotester.FromServer.UnitWalking.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateName.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateSkillTree.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateStatus_121.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateStatus_13a.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateStatus_141.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateStatus_b0.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateStatus_b1.Companion.reader
+import hu.nevermind.rotester.FromServer.UpdateStatus_be.Companion.reader
+import hu.nevermind.rotester.FromServer.WalkOk.Companion.reader
+import hu.nevermind.rotester.FromServer.WhisperResultPacket.Companion.reader
 import java.nio.ByteBuffer
 
 
@@ -596,12 +642,12 @@ object FromServer {
         }
     }
 
-    data class WalkOk(val tick: Int, val pos2: ByteArray) : Packet {
+    data class WalkOk(val tick: Int, val posChange: PosChange) : Packet {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> WalkOk? = {
                 FromServer.WalkOk(
                         tick = byte4(),
-                        pos2 = bytes(6)
+                        posChange = positionChange()
                 )
             }
         }
@@ -1212,7 +1258,12 @@ object FromServer {
             val b4 = byte1()
             val b5 = byte1()
             return PosChange(
-                    0, 0, 0, 0, 0, 0
+                    b0.and(0xff).shl(2).or(b1.shr(6)),
+                    b1.and(0x3f).shl(4).or(b2.shr(4)),
+                    b2.and(0x0f).shl(6).or(b3.shr(2)),
+                    b3.and(0x03).shl(8).or(b4.shr(0)),
+                    b5.and(0xf0).shr(4),
+                    b5.and(0x0f).shr(0)
             )
         }
 

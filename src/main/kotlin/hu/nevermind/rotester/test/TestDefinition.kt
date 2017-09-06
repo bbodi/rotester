@@ -25,14 +25,14 @@ open class TestDefinition(val body: suspend TestDefinitionBuilder.() -> Unit) {
             val testDefinitionBuilder = TestDefinitionBuilder(this, testDirectorCommunicator)
             body(testDefinitionBuilder) // given is filled
             val sb = StringBuilder()
-            sb.append("\ngiven(${given.description})")
+            sb.append("\ngiven (${given.description})")
             try {
                 given.body.invoke(GivenBuilder(this)) // given.onDefinitions is filled
                 given.onDefinitions.forEach { onDefinition ->
-                    sb.append("\n\ton(${onDefinition.description})\n")
+                    sb.append("\n\ton (${onDefinition.description})\n")
                     onDefinition.body.invoke(OnBuilder(onDefinition)) // given.onDefinition.itDefinitions is filled
                     onDefinition.itDefinitions.forEach { itDefinition ->
-                        val itStr = "\n\t\tit(${itDefinition.description})"
+                        val itStr = "\n\t\tit (${itDefinition.description})"
                         sb.append(itStr)
                         itDefinition.body.invoke(ItBuilder(this))
                         sb.append("SUCCESS".padStart(140-itStr.length))

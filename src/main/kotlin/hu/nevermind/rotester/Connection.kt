@@ -55,8 +55,12 @@ suspend fun connect(host: String, port: Int): Connection {
 
                 val outgoingDataChannel = Channel<ByteArray>()
                 launch(CommonPool) {
-                    for (data in outgoingDataChannel) {
-                        asynchronousSocketChannel.write(ByteBuffer.wrap(data))
+                    try {
+                        for (data in outgoingDataChannel) {
+                            asynchronousSocketChannel.write(ByteBuffer.wrap(data))
+                        }
+                    } catch (e: Exception) {
+                        logger.error("asynchronousSocketChannel.write", e)
                     }
                 }
                 continuation.resume(Connection(incomingDataProducer, outgoingDataChannel, asynchronousSocketChannel))

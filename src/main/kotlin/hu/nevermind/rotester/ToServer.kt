@@ -89,7 +89,7 @@ object ToServer {
         }
     }
 
-    class WalkTo(val x: Int, val y: Int) : Packet(0x85) {
+    class WalkTo(val x: Int, val y: Int) : Packet(0x363) {
         override fun PacketFieldWriter.buildPacket() {
             mapPosition(x, y)
         }

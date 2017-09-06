@@ -2,7 +2,6 @@ package hu.nevermind.rotester.test
 
 import hu.nevermind.rotester.FromServer
 import hu.nevermind.rotester.assertEquals
-import hu.nevermind.rotester.logger
 
 object WarpCommandTest : TestDefinition({
     given("@Warp command must work") {

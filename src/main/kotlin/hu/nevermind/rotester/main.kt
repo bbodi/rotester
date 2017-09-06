@@ -1,5 +1,6 @@
 package hu.nevermind.rotester
 
+import hu.nevermind.rotester.test.WalkingTest
 import hu.nevermind.rotester.test.WarpCommandTest
 import hu.nevermind.rotester.test.WhisperTest
 import kotlinx.coroutines.experimental.CommonPool
@@ -12,12 +13,11 @@ import java.nio.ByteOrder
 val logger = LoggerFactory.getLogger("global")
 
 fun <T> assertEquals(expected: T, actual: T) {
-    require(expected == actual) {"expected: $expected, but was $actual"}
+    require(expected == actual) { "expected: $expected, but was $actual" }
 }
 
 fun main(args: Array<String>) = runBlocking {
 
-    //    val socketChannel = SocketChannel.open()
     val jobs = List(1) { index ->
         launch(CommonPool) {
             val testDirector = TestDirector(
@@ -30,18 +30,8 @@ fun main(args: Array<String>) = runBlocking {
 
             WhisperTest.run(testDirector)
             WarpCommandTest.run(testDirector)
+//            WalkingTest.run(testDirector)
 
-////        var (x, y) = clientState.pos.x to clientState.pos.y
-////        var yDir = -1
-////        (0 until 1).forEach { walkCount ->
-////            mapSession.send(ToServer.WalkTo(x, y + yDir))
-////            packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
-////            y += yDir
-////            yDir *= -1
-////            println("$walkCount ok ;)")
-////            delay(1000)
-////        }
-//            }))
             testDirector.actor.join()
         }
     }
