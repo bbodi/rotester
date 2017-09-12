@@ -34,11 +34,11 @@ class PlayerActor(private val username: String,
 
             val charServerIp = toIpString(loginResponse.charServerDatas[0].ip)
 
-            val (mapData, charName) = connectToCharServerAndSelectChar(charServerIp, loginResponse, 0)
+            val (mapData, charName) = connectToCharServerAndSelectChar(username, charServerIp, loginResponse, 0)
             clientState = clientState.copy(mapName = mapData.mapName)
-            Session("PlayerActor - mapSession", connect(toIpString(mapData.ip), mapData.port)).use { mapSession ->
+            Session("PlayerActor - mapSession", connect(charName, toIpString(mapData.ip), mapData.port)).use { mapSession ->
                 println("connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
-                val packetArrivalVerifier = PacketArrivalVerifier()
+                val packetArrivalVerifier = PacketArrivalVerifier(charName)
                 mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
                 mapSession.asyncStartProcessingIncomingPackets()
                 mapSession.send(ToServer.ConnectToMapServer(

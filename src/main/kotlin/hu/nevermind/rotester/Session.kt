@@ -21,7 +21,7 @@ data class IncaseOfPacketMessage(val expectedPacketClass: KClass<FromServer.Pack
 
 class ClearHistory(val responseChannel: Channel<Any>) : IncomingPacketSubscriberMessage()
 
-class PacketArrivalVerifier() {
+class PacketArrivalVerifier(val name: String) {
 
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
 
@@ -29,9 +29,10 @@ class PacketArrivalVerifier() {
             where T : FromServer.Packet {
         val responseChannel = Channel<FromServer.Packet>()
         val incomingPackets = mutableListOf<T>()
-        logger.trace("waiting for ${expectedPacketClass.simpleName}-s ${if (predicate != null) "[with predicate]" else ""}")
+        logger.trace("[$name] Collecting ${expectedPacketClass.simpleName}-s ${if (predicate != null) "[with predicate]" else ""}")
         actor.send(IncaseOfPacketMessage(expectedPacketClass as KClass<FromServer.Packet>, timeout,
                 timeoutAction = {
+                    logger.trace("[$name] Collection for ${expectedPacketClass.simpleName}-s ${if (predicate != null) "[with predicate]" else ""} ended")
                     responseChannel.close(CancellationException())
                 },
                 responseChannel = responseChannel,
@@ -51,7 +52,7 @@ class PacketArrivalVerifier() {
     suspend fun <T> waitForPacket(expectedPacketClass: KClass<T>, timeout: Long, predicate: ((T) -> Boolean)? = null): T
             where T : FromServer.Packet {
         val responseChannel = Channel<FromServer.Packet>()
-        logger.trace("waiting for ${expectedPacketClass.simpleName}${if (predicate != null) "[with predicate]" else ""}")
+        logger.trace("[$name] waiting for ${expectedPacketClass.simpleName}${if (predicate != null) "[with predicate]" else ""}")
         actor.send(IncaseOfPacketMessage(expectedPacketClass as KClass<FromServer.Packet>, timeout,
                 timeoutAction = {
                     responseChannel.close(CancellationException("Waited for ${expectedPacketClass.simpleName}${if (predicate != null) "[with predicate]" else ""}, but didn't arrived."))
@@ -64,7 +65,7 @@ class PacketArrivalVerifier() {
     }
 
     suspend fun cleanPacketHistory() {
-        logger.debug("cleaning packet history")
+        logger.debug("[$name] cleaning packet history")
         val responseChannel = Channel<Any>()
         actor.send(ClearHistory(responseChannel))
         responseChannel.receive()
@@ -97,7 +98,7 @@ class PacketArrivalVerifier() {
             when (msg) {
                 is IncomingPacketArrivedMessage -> {
                     val found = tasks.firstOrNull { task ->
-                        msg.incomingPacket::class == task.expectedPacketClass && task.predicate?.invoke(msg.incomingPacket) ?: true
+                        msg.incomingPacket::class.isSubclassOf(task.expectedPacketClass) && task.predicate?.invoke(msg.incomingPacket) ?: true
                     }
                     if (found != null) {
                         found.responseChannel.send(msg.incomingPacket)
@@ -164,7 +165,7 @@ class Session(val name: String, val connection: Connection) : AutoCloseable {
                     delay(10)
                 }
             } catch (e: Exception) {
-                logger.error("asyncStartProcessingIncomingPackets", e)
+                logger.error("[$name] asyncStartProcessingIncomingPackets", e)
             }
         }
     }
@@ -187,7 +188,7 @@ class Session(val name: String, val connection: Connection) : AutoCloseable {
     }
 
     suspend fun send(packet: ToServer.Packet) {
-        logger.trace("[Send] $packet")
+        logger.trace("[$name] [Send] $packet")
         connection.fill(packet)
         connection.send()
     }

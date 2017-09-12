@@ -90,12 +90,12 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
 
                             val charServerIp = toIpString(loginResponse.charServerDatas[0].ip)
 
-                            val (mapData, charName) = connectToCharServerAndSelectChar(charServerIp, loginResponse, 0)
+                            val (mapData, charName) = connectToCharServerAndSelectChar(msg.username, charServerIp, loginResponse, 0)
                             mapName = mapData.mapName
 
-                            val mapSession = Session("roClient - mapSession", connect(toIpString(mapData.ip), mapData.port))
+                            val mapSession = Session("roClient - mapSession", connect(charName, toIpString(mapData.ip), mapData.port))
                             logger.debug("${msg.username} connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
-                            val packetArrivalVerifier = PacketArrivalVerifier()
+                            val packetArrivalVerifier = PacketArrivalVerifier(charName)
                             mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
                             mapSession.asyncStartProcessingIncomingPackets()
                             mapSession.send(ToServer.ConnectToMapServer(
@@ -119,7 +119,6 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                             maxRoClient++
                         } catch (e: Exception) {
                             logger.error("error", e)
-                            throw e;
                         }
                     }
                     is WarpChar -> {

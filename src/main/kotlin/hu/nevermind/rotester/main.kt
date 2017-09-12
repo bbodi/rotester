@@ -1,8 +1,6 @@
 package hu.nevermind.rotester
 
 import hu.nevermind.rotester.test.WalkingTest
-import hu.nevermind.rotester.test.WarpCommandTest
-import hu.nevermind.rotester.test.WhisperTest
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
@@ -24,13 +22,13 @@ fun main(args: Array<String>) = runBlocking {
                     listOf(GmActor("gmgm", "gmgm")),
                     listOf(TestDirector.MapPos("prontera", 100, 100))
             )
-            (1..3).forEach {
+            (1..1).forEach {
                 testDirector.actor.send(LoginToMap("bot$it", "bot$it"))
             }
 
-            WhisperTest.run(testDirector)
-            WarpCommandTest.run(testDirector)
-//            WalkingTest.run(testDirector)
+//            WhisperTest.run(testDirector)
+//            WarpCommandTest.run(testDirector)
+            WalkingTest.run(testDirector)
 
             testDirector.actor.join()
         }
@@ -48,9 +46,9 @@ fun toIpString(ip: Int): String {
     return charServerIp
 }
 
-suspend fun connectToCharServerAndSelectChar(charServerIp: String, loginResponse: FromServer.LoginSucceedResponsePacket, charIndex: Int): Pair<FromServer.MapServerData, String> {
-    Session("charSession", connect(charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
-        val packetArrivalVerifier = PacketArrivalVerifier()
+suspend fun connectToCharServerAndSelectChar(username: String, charServerIp: String, loginResponse: FromServer.LoginSucceedResponsePacket, charIndex: Int): Pair<FromServer.MapServerData, String> {
+    Session("char[$username]", connect("char[$username]", charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
+        val packetArrivalVerifier = PacketArrivalVerifier("char[$username]")
         charSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
         charSession.send(ToServer.CharServerInit(
                 accountId = loginResponse.accountId,
@@ -75,9 +73,9 @@ suspend fun connectToCharServerAndSelectChar(charServerIp: String, loginResponse
 }
 
 suspend fun login(username: String, password: String): FromServer.LoginSucceedResponsePacket {
-    val loginSession = Session("loginSession", connect("localhost", 6900))
+    val loginSession = Session("login[$username]", connect("login[$username]", "localhost", 6900))
     loginSession.asyncStartProcessingIncomingPackets()
-    val packetArrivalVerifier = PacketArrivalVerifier()
+    val packetArrivalVerifier = PacketArrivalVerifier("login[$username]")
     loginSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
     loginSession.send(ToServer.LoginPacket(username, password))
     packetArrivalVerifier.inCaseOf(FromServer.CharSelectErrorResponse::class) { p ->

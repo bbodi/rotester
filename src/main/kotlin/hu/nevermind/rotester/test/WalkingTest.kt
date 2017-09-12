@@ -10,16 +10,20 @@ object WalkingTest : TestDefinition({
 
         on("Moving to left") {
             testDirector.warpMeTo(
-                    "prontera", 100, 101,
+                    "prontera", 100, 100,
                     roClient.clientState.charName,
                     roClient.mapSession,
                     roClient.packetArrivalVerifier)
             roClient.packetArrivalVerifier.cleanPacketHistory()
-            roClient.mapSession.send(ToServer.WalkTo(100, 90))
+            roClient.mapSession.send(ToServer.WalkTo(101, 100))
             it("should get a ChangeMap packet with the expected coordinates") {
-//                val asd = roClient.packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
-                val asd = roClient.packetArrivalVerifier.collectIncomingPackets(FromServer.Packet::class, 5000)
-                println(asd)
+                val walkOkPacket = roClient.packetArrivalVerifier.waitForPacket(FromServer.WalkOk::class, 5000)
+                assertEquals(100, walkOkPacket.posChange.srcX)
+                assertEquals(100, walkOkPacket.posChange.srcY)
+                assertEquals(101, walkOkPacket.posChange.dstX)
+                assertEquals(100, walkOkPacket.posChange.dstY)
+                assertEquals(8, walkOkPacket.posChange.sx)
+                assertEquals(8, walkOkPacket.posChange.sy)
             }
         }
     }

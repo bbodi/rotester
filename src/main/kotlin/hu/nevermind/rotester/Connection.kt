@@ -20,7 +20,7 @@ import java.nio.channels.CompletionHandler
 import java.util.*
 import kotlin.coroutines.experimental.suspendCoroutine
 
-suspend fun connect(host: String, port: Int): Connection {
+suspend fun connect(name: String, host: String, port: Int): Connection {
     return suspendCoroutine<Connection> { continuation ->
         val asynchronousSocketChannel = AsynchronousSocketChannel.open()
         asynchronousSocketChannel.connect(InetSocketAddress(host, port), 1, object : CompletionHandler<Void, Int> {
@@ -60,16 +60,16 @@ suspend fun connect(host: String, port: Int): Connection {
                             asynchronousSocketChannel.write(ByteBuffer.wrap(data))
                         }
                     } catch (e: Exception) {
-                        logger.error("asynchronousSocketChannel.write", e)
+                        logger.error("[$name] asynchronousSocketChannel.write", e)
                     }
                 }
-                continuation.resume(Connection(incomingDataProducer, outgoingDataChannel, asynchronousSocketChannel))
+                continuation.resume(Connection(name, incomingDataProducer, outgoingDataChannel, asynchronousSocketChannel))
             }
         })
     }
 }
 
-data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val outgoingDataChannel: SendChannel<ByteArray>,
+data class Connection(val name: String, val incomingDataProducer: ReceiveChannel<ByteArray>, val outgoingDataChannel: SendChannel<ByteArray>,
                       private val asynchronousSocketChannel: AsynchronousSocketChannel) {
 
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
@@ -90,14 +90,14 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
 
     fun fill(packet: ToServer.Packet) {
         packet.write(outgoingBuffer)
-        logger.trace("[SendBuffer] ${outgoingBuffer.position()}/${outgoingBuffer.capacity()}")
+        logger.trace("[$name] [SendBuffer] ${outgoingBuffer.position()}/${outgoingBuffer.capacity()}")
     }
 
     suspend fun send() {
         outgoingBuffer.flip()
         val sendingBytes = ByteArray(outgoingBuffer.remaining())
         if (logger.isTraceEnabled) {
-            logger.trace("Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
+            logger.trace("[$name] Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
         }
         outgoingBuffer.get(sendingBytes, outgoingBuffer.position(), outgoingBuffer.limit())
         outgoingDataChannel.send(sendingBytes)
@@ -111,7 +111,7 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
             require(dstBuffer.remaining() >= receivedBytes.size)
             buf.order(ByteOrder.LITTLE_ENDIAN)
             if (logger.isTraceEnabled) {
-                logger.trace("Incoming data: {}", toHexDump(buf.duplicate(), 0, receivedBytes.size))
+                logger.trace("[$name] Incoming data: {}", toHexDump(buf.duplicate(), 0, receivedBytes.size))
             }
             dstBuffer.put(buf)
         }
@@ -154,8 +154,8 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                         } else {
                             incomingBuffer.position(startOfFirstUnprocessedByte)
                             val remainingBytesAsString = toHexDump(incomingBuffer.duplicate(), beginOfPacketPos, indexOfLastIncomingByte)
-                            logger.error("Unknown packet\n$remainingBytesAsString")
-                            logger.error("Packets in buffer: ${incomingPackets.joinToString("\n    ")}")
+                            logger.error("[$name] Unknown packet\n$remainingBytesAsString")
+                            logger.error("[$name] Packets in buffer: ${incomingPackets.joinToString("\n    ")}")
                             run = false
                             continuation.resumeWithException(IllegalStateException("Unknown packet: " + remainingBytesAsString))
                         }
@@ -234,9 +234,8 @@ data class Connection(val incomingDataProducer: ReceiveChannel<ByteArray>, val o
                         error("$incomingPacket: more bytes were read ($currentPosition) than the static size would suggest ($newPosition)")
                     }
                     incomingBuffer.position(newPosition)
-                } else {
-                    logger.trace("Incoming Packet [$incomingPacket] - [${incomingBuffer.position() - beginOfPacketPos} bytes]")
                 }
+                logger.trace("[$name] Incoming Packet [$incomingPacket] - [${incomingBuffer.position() - beginOfPacketPos} bytes]")
                 startOfFirstUnprocessedByte = incomingBuffer.position()
                 incomingPacket
             } else {

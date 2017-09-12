@@ -47,6 +47,7 @@ import hu.nevermind.rotester.FromServer.UpdateStatus_be.Companion.reader
 import hu.nevermind.rotester.FromServer.WalkOk.Companion.reader
 import hu.nevermind.rotester.FromServer.WhisperResultPacket.Companion.reader
 import java.nio.ByteBuffer
+import kotlin.experimental.and
 
 
 object FromServer {
@@ -1240,30 +1241,33 @@ object FromServer {
         }
 
         fun mapPosition(): Pos {
-            val b1 = byte1()
-            val b2 = byte1()
-            val b3 = byte1()
+            // 00xx_xxxx
+            // xx00_yyyy
+            // yyyy_dddd
+            val b1 = ubyte1()
+            val b2 = ubyte1()
+            val b3 = ubyte1()
             return Pos(
                     x = b1.shl(2).and(0B1111_1100).or(b2.ushr(6).and(0B11)),
-                    y = b1.shl(4).and(0B1111_0000).or(b3.ushr(4).and(0B1111)),
+                    y = b2.shl(4).and(0B1111_0000).or(b3.ushr(4).and(0B1111)),
                     dir = b3.and(0b1111)
             )
         }
 
         fun positionChange(): PosChange {
-            val b0 = byte1()
-            val b1 = byte1()
-            val b2 = byte1()
-            val b3 = byte1()
-            val b4 = byte1()
-            val b5 = byte1()
+            val b0 = ubyte1()
+            val b1 = ubyte1()
+            val b2 = ubyte1()
+            val b3 = ubyte1()
+            val b4 = ubyte1()
+            val b5 = ubyte1()
             return PosChange(
-                    b0.and(0xff).shl(2).or(b1.shr(6)),
-                    b1.and(0x3f).shl(4).or(b2.shr(4)),
-                    b2.and(0x0f).shl(6).or(b3.shr(2)),
-                    b3.and(0x03).shl(8).or(b4.shr(0)),
-                    b5.and(0xf0).shr(4),
-                    b5.and(0x0f).shr(0)
+                    b0.and(0xff).shl(2).or(b1.ushr(6)),
+                    b1.and(0x3f).shl(4).or(b2.ushr(4)),
+                    b2.and(0x0f).shl(6).or(b3.ushr(2)),
+                    b3.and(0x03).shl(8).or(b4.ushr(0)),
+                    b5.and(0xf0).ushr(4),
+                    b5.and(0x0f).ushr(0)
             )
         }
 
