@@ -33,8 +33,7 @@ class GmActor(private val username: String, private val password: String) {
             mapName = mapData.mapName
             Session("GM - mapSession", connect(charName, toIpString(mapData.ip), mapData.port)).use { mapSession ->
                 logger.info("$username connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
-                val packetArrivalVerifier = PacketArrivalVerifier(charName)
-                mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
+                val packetArrivalVerifier = PacketArrivalVerifier(charName, mapSession)
                 mapSession.asyncStartProcessingIncomingPackets()
                 mapSession.send(ToServer.ConnectToMapServer(
                         accountId = loginResponse.accountId,

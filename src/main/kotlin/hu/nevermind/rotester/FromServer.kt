@@ -2,6 +2,8 @@ package hu.nevermind.rotester
 
 import hu.nevermind.rotester.FromServer.BroadcastMessage.Companion.reader
 import hu.nevermind.rotester.FromServer.ChangeMap.Companion.reader
+import hu.nevermind.rotester.FromServer.CharCreationRejected.Companion.reader
+import hu.nevermind.rotester.FromServer.CharCreationSuccessful.Companion.reader
 import hu.nevermind.rotester.FromServer.CharListPages.Companion.reader
 import hu.nevermind.rotester.FromServer.CharSelectErrorResponse.Companion.reader
 import hu.nevermind.rotester.FromServer.CharWindow.Companion.reader
@@ -30,6 +32,7 @@ import hu.nevermind.rotester.FromServer.NpcSpriteChange.Companion.reader
 import hu.nevermind.rotester.FromServer.ObjectMove.Companion.reader
 import hu.nevermind.rotester.FromServer.PartyInvitationState.Companion.reader
 import hu.nevermind.rotester.FromServer.PincodeState.Companion.reader
+import hu.nevermind.rotester.FromServer.RejectedFromCharServer.Companion.reader
 import hu.nevermind.rotester.FromServer.ResponseToDisconnectionRequest.Companion.reader
 import hu.nevermind.rotester.FromServer.ScriptClose.Companion.reader
 import hu.nevermind.rotester.FromServer.SetMapProperty.Companion.reader
@@ -47,7 +50,6 @@ import hu.nevermind.rotester.FromServer.UpdateStatus_be.Companion.reader
 import hu.nevermind.rotester.FromServer.WalkOk.Companion.reader
 import hu.nevermind.rotester.FromServer.WhisperResultPacket.Companion.reader
 import java.nio.ByteBuffer
-import kotlin.experimental.and
 
 
 object FromServer {
@@ -64,6 +66,30 @@ object FromServer {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> LoginFailResponsePacket? = {
                 FromServer.LoginFailResponsePacket(byte1())
+            }
+        }
+    }
+
+    data class RejectedFromCharServer(val reason: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> RejectedFromCharServer? = {
+                FromServer.RejectedFromCharServer(byte1())
+            }
+        }
+    }
+
+    data class CharCreationRejected(val reason: Int) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> CharCreationRejected? = {
+                FromServer.CharCreationRejected(byte1())
+            }
+        }
+    }
+
+    data class CharCreationSuccessful(val charInfo: CharacterList.CharacterInfo) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> CharCreationSuccessful? = {
+                FromServer.CharCreationSuccessful(readCharInfo())
             }
         }
     }
@@ -119,69 +145,21 @@ object FromServer {
         }
     }
 
-
     data class CharacterList(val maxSlots: Int, val availableSlots: Int, val premiumSlots: Int, val charInfos: List<CharacterInfo>) : Packet {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> CharacterList? = {
                 val packetLen = byte2()
-                val readCharInfo = {
-                    val charInfos = arrayListOf<CharacterList.CharacterInfo>()
-                    while (readBytes + 2 < packetLen) {
-                        charInfos.add(
-                                CharacterList.CharacterInfo(
-                                        char_id = byte4(),
-                                        base_exp = byte4(),
-                                        zeny = byte4(),
-                                        job_exp = byte4(),
-                                        job_level = byte4(),
-                                        opt1 = byte4(),
-                                        opt2 = byte4(),
-                                        option = byte4(),
-                                        karma = byte4(),
-                                        manner = byte4(),
-                                        status_point = byte2(),
-                                        hp = byte4(),
-                                        max_hp = byte4(),
-                                        sp = byte2(),
-                                        max_sp = byte2(),
-                                        walkSpeed = byte2(),
-                                        class_ = byte2(),
-                                        hair = byte2(),
-                                        body = byte2(),
-                                        weapon = byte2(),
-                                        base_level = byte2(),
-                                        skill_point = byte2(),
-                                        head_bottom = byte2(),
-                                        shield = byte2(),
-                                        head_top = byte2(),
-                                        head_mid = byte2(),
-                                        hair_color = byte2(),
-                                        clothes_color = byte2(),
-                                        name = string(23 + 1),
-                                        str = byte1(),
-                                        agi = byte1(),
-                                        vit = byte1(),
-                                        int = byte1(),
-                                        dex = byte1(),
-                                        luk = byte1(),
-                                        slot = byte2(),
-                                        rename = byte2(),
-                                        last_point_map = string(16),
-                                        delete_date = byte4(),
-                                        robe = byte4(),
-                                        char_move_enabled = byte4(),
-                                        rename2 = byte4(),
-                                        sex = byte1()
-                                )
-                        )
-                    }
-                    charInfos
-                }
                 val ret = FromServer.CharacterList(
                         maxSlots = byte1(),
                         availableSlots = byte1(),
                         premiumSlots = byte1(),
-                        charInfos = skip(20, "unknown").then { readCharInfo() }
+                        charInfos = skip(20, "unknown").then {
+                            val charInfos = kotlin.collections.arrayListOf<CharacterList.CharacterInfo>()
+                            while (readBytes + 2 < packetLen) {
+                                charInfos.add(readCharInfo())
+                            }
+                            charInfos
+                        }
                 )
                 ret
             }
@@ -304,16 +282,17 @@ object FromServer {
         }
     }
 
-    /*  * result :
- *  1 : Server closed
- *  2 : Someone has already logged in with this id
- *  8 : already online
- */
-    data class CharSelectErrorResponse(val reason: Int) : Packet {
+
+    data class CharSelectErrorResponse(val reason: String) : Packet {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> CharSelectErrorResponse? = {
                 FromServer.CharSelectErrorResponse(
-                        reason = byte1()
+                        reason = when(byte1()) {
+                            1 -> "Server Closed"
+                            2 -> "Someone has already logged in with this id"
+                            8 -> "Already online"
+                            else -> "unknown"
+                        }
                 )
             }
         }
@@ -1150,6 +1129,9 @@ object FromServer {
 
     val PACKETS = listOf(
             Triple(0x83e, 26, LoginFailResponsePacket.reader),
+            Triple(0x6c, 3, RejectedFromCharServer.reader),
+            Triple(0x6e, 3, CharCreationRejected.reader),
+            Triple(0x6d, 0, CharCreationSuccessful.reader),
             Triple(0x69, 0, LoginSucceedResponsePacket.reader), // 47+32*server_num
             Triple(0x82d, 29, CharWindow.reader),
             Triple(0x6b, 0, CharacterList.reader),
@@ -1210,6 +1192,54 @@ object FromServer {
         fun skip(count: Int, comment: String = ""): PacketFieldReader {
             bb.position(bb.position() + count)
             return this
+        }
+
+        fun readCharInfo(): CharacterList.CharacterInfo {
+            return CharacterList.CharacterInfo(
+                    char_id = byte4(),
+                    base_exp = byte4(),
+                    zeny = byte4(),
+                    job_exp = byte4(),
+                    job_level = byte4(),
+                    opt1 = byte4(),
+                    opt2 = byte4(),
+                    option = byte4(),
+                    karma = byte4(),
+                    manner = byte4(),
+                    status_point = byte2(),
+                    hp = byte4(),
+                    max_hp = byte4(),
+                    sp = byte2(),
+                    max_sp = byte2(),
+                    walkSpeed = byte2(),
+                    class_ = byte2(),
+                    hair = byte2(),
+                    body = byte2(),
+                    weapon = byte2(),
+                    base_level = byte2(),
+                    skill_point = byte2(),
+                    head_bottom = byte2(),
+                    shield = byte2(),
+                    head_top = byte2(),
+                    head_mid = byte2(),
+                    hair_color = byte2(),
+                    clothes_color = byte2(),
+                    name = string(23 + 1),
+                    str = byte1(),
+                    agi = byte1(),
+                    vit = byte1(),
+                    int = byte1(),
+                    dex = byte1(),
+                    luk = byte1(),
+                    slot = byte2(),
+                    rename = byte2(),
+                    last_point_map = string(16),
+                    delete_date = byte4(),
+                    robe = byte4(),
+                    char_move_enabled = byte4(),
+                    rename2 = byte4(),
+                    sex = byte1()
+            )
         }
 
         fun byte1(): Int {

@@ -74,8 +74,8 @@ data class Connection(val name: String, val incomingDataProducer: ReceiveChannel
 
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
 
-    private val outgoingBuffer = ByteBuffer.allocate(1024)
-    private val incomingBuffer = ByteBuffer.allocate(1024)
+    private val outgoingBuffer = ByteBuffer.allocate(2048)
+    private val incomingBuffer = ByteBuffer.allocate(2048)
     private var startOfFirstUnprocessedByte = 0
     private var indexOfLastIncomingByte = 0
 
@@ -108,7 +108,9 @@ data class Connection(val name: String, val incomingDataProducer: ReceiveChannel
         val receivedBytes = receiveChannel.poll()
         if (receivedBytes != null) {
             val buf = ByteBuffer.wrap(receivedBytes)
-            require(dstBuffer.remaining() >= receivedBytes.size)
+            require(dstBuffer.remaining() >= receivedBytes.size) {
+                "${dstBuffer.remaining()} >= ${receivedBytes.size}"
+            }
             buf.order(ByteOrder.LITTLE_ENDIAN)
             if (logger.isTraceEnabled) {
                 logger.trace("[$name] Incoming data: {}", toHexDump(buf.duplicate(), 0, receivedBytes.size))

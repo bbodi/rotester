@@ -38,8 +38,7 @@ class PlayerActor(private val username: String,
             clientState = clientState.copy(mapName = mapData.mapName)
             Session("PlayerActor - mapSession", connect(charName, toIpString(mapData.ip), mapData.port)).use { mapSession ->
                 println("connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
-                val packetArrivalVerifier = PacketArrivalVerifier(charName)
-                mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
+                val packetArrivalVerifier = PacketArrivalVerifier(charName, mapSession)
                 mapSession.asyncStartProcessingIncomingPackets()
                 mapSession.send(ToServer.ConnectToMapServer(
                         accountId = loginResponse.accountId,

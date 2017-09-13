@@ -1,6 +1,8 @@
 package hu.nevermind.rotester
 
 import hu.nevermind.rotester.test.WalkingTest
+import hu.nevermind.rotester.test.WarpCommandTest
+import hu.nevermind.rotester.test.WhisperTest
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
@@ -20,14 +22,15 @@ fun main(args: Array<String>) = runBlocking {
         launch(CommonPool) {
             val testDirector = TestDirector(
                     listOf(GmActor("gmgm", "gmgm")),
+//                    emptyList(),
                     listOf(TestDirector.MapPos("prontera", 100, 100))
             )
-            (1..1).forEach {
+            (1..6).forEach {
                 testDirector.actor.send(LoginToMap("bot$it", "bot$it"))
             }
 
-//            WhisperTest.run(testDirector)
-//            WarpCommandTest.run(testDirector)
+            WhisperTest.run(testDirector)
+            WarpCommandTest.run(testDirector)
             WalkingTest.run(testDirector)
 
             testDirector.actor.join()
@@ -48,8 +51,7 @@ fun toIpString(ip: Int): String {
 
 suspend fun connectToCharServerAndSelectChar(username: String, charServerIp: String, loginResponse: FromServer.LoginSucceedResponsePacket, charIndex: Int): Pair<FromServer.MapServerData, String> {
     Session("char[$username]", connect("char[$username]", charServerIp, loginResponse.charServerDatas[0].port)).use { charSession ->
-        val packetArrivalVerifier = PacketArrivalVerifier("char[$username]")
-        charSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
+        val packetArrivalVerifier = PacketArrivalVerifier("char[$username]", charSession)
         charSession.send(ToServer.CharServerInit(
                 accountId = loginResponse.accountId,
                 loginId = loginResponse.loginId,
@@ -64,24 +66,60 @@ suspend fun connectToCharServerAndSelectChar(username: String, charServerIp: Str
         if (pincodeState.state != 0) {
             error("pincode is enabled! Please disable it in conf/char_athena.conf")
         }
+        packetArrivalVerifier.cleanPacketHistory()
+        val selectedCharName = if (characterList.charInfos.isEmpty()) {
+            logger.info("There is no character for this account, creating one...")
+            charSession.send(ToServer.CreateChar(username.capitalize(),
+                    //                    str = 1,
+//                    agi = 1,
+//                    vit = 1,
+//                    int = 1,
+//                    dex = 1,
+//                    luk = 1,
+                    slot = 0,
+                    hairColor = 0,
+                    hairStyle = 0,
+                    startingJobId = 0,
+                    sex = 0)
+            )
+            charSession.send(ToServer.SelectChar(charIndex))
+            // TODO: these tasks should be removed after timeout from packetArrivalVerifier
+            packetArrivalVerifier.inCaseOf(FromServer.CharCreationRejected::class, 5000) { p ->
+                logger.info("Char creation error(${p.reason})")
+            }
+            val charCreationResponse = packetArrivalVerifier.waitForPacket(FromServer.CharCreationSuccessful::class, 5000)
+            logger.info("Char created ${charCreationResponse.charInfo.name}")
+            charCreationResponse.charInfo.name
+        } else {
+            characterList.charInfos[0].name
+        }
         charSession.send(ToServer.SelectChar(charIndex))
         val mapData = packetArrivalVerifier.waitForPacket(FromServer.MapServerData::class, 5000)
         charSession.close()
         logger.debug("$mapData")
-        return mapData to characterList.charInfos[0].name
+        return mapData to selectedCharName
     }
 }
 
 suspend fun login(username: String, password: String): FromServer.LoginSucceedResponsePacket {
     val loginSession = Session("login[$username]", connect("login[$username]", "localhost", 6900))
     loginSession.asyncStartProcessingIncomingPackets()
-    val packetArrivalVerifier = PacketArrivalVerifier("login[$username]")
-    loginSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
+    val packetArrivalVerifier = PacketArrivalVerifier("login[$username]", loginSession)
     loginSession.send(ToServer.LoginPacket(username, password))
-    packetArrivalVerifier.inCaseOf(FromServer.CharSelectErrorResponse::class) { p ->
-        logger.debug("Login error: ${p.reason}")
+    val packet = packetArrivalVerifier.waitForPacket(FromServer.Packet::class, 5000)
+    return when (packet) {
+        is FromServer.LoginFailResponsePacket -> {
+            logger.info("Login error: ${packet.reason}. Account $username does not exist")
+            logger.info("creating one...")
+            loginSession.send(ToServer.LoginPacket("${username}_M", password))
+            val loginResponse = packetArrivalVerifier.waitForPacket(FromServer.LoginSucceedResponsePacket::class, 5000)
+            loginSession.close()
+            loginResponse
+        }
+        is FromServer.LoginSucceedResponsePacket -> {
+            loginSession.close()
+            packet
+        }
+        else -> error(packet)
     }
-    val loginResponse = packetArrivalVerifier.waitForPacket(FromServer.LoginSucceedResponsePacket::class, 5000)
-    loginSession.close()
-    return loginResponse
 }

@@ -2,6 +2,7 @@ package hu.nevermind.rotester
 
 import kotlinx.coroutines.experimental.*
 import kotlinx.coroutines.experimental.channels.Channel
+import kotlinx.coroutines.experimental.channels.ReceiveChannel
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.actor
 import org.slf4j.Logger
@@ -19,9 +20,11 @@ data class IncaseOfPacketMessage(val expectedPacketClass: KClass<FromServer.Pack
                                  val waitUntilTimeout: Boolean = false,
                                  val predicate: ((FromServer.Packet) -> Boolean)? = null) : IncomingPacketSubscriberMessage()
 
+class WaitingForPacketTimeout(msg: String) : RuntimeException(msg)
+
 class ClearHistory(val responseChannel: Channel<Any>) : IncomingPacketSubscriberMessage()
 
-class PacketArrivalVerifier(val name: String) {
+class PacketArrivalVerifier(val name: String, session: Session) {
 
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
 
@@ -49,19 +52,41 @@ class PacketArrivalVerifier(val name: String) {
         }
     }
 
-    suspend fun <T> waitForPacket(expectedPacketClass: KClass<T>, timeout: Long, predicate: ((T) -> Boolean)? = null): T
+    suspend fun <T> waitForPacket(expectedPacketClass: KClass<T>, timeout: Long,
+                                  predicate: ((T) -> Boolean)? = null): T
             where T : FromServer.Packet {
+        val timeoutChannel = Channel<Int>()
         val responseChannel = Channel<FromServer.Packet>()
+        val mixedChannel = multiplex(responseChannel, timeoutChannel)
         logger.trace("[$name] waiting for ${expectedPacketClass.simpleName}${if (predicate != null) "[with predicate]" else ""}")
         actor.send(IncaseOfPacketMessage(expectedPacketClass as KClass<FromServer.Packet>, timeout,
                 timeoutAction = {
-                    responseChannel.close(CancellationException("Waited for ${expectedPacketClass.simpleName}${if (predicate != null) "[with predicate]" else ""}, but didn't arrived."))
+                    async(CommonPool) {
+                        timeoutChannel.send(0)
+                    }
                 },
                 responseChannel = responseChannel,
                 predicate = predicate as ((FromServer.Packet) -> Boolean)?
         ))
-        val packet = responseChannel.receive()
-        return packet as T
+        val packet = mixedChannel.receive()
+        if (packet is Int) {
+            throw WaitingForPacketTimeout("[$name] Waited for ${expectedPacketClass.simpleName}${if (predicate != null) "[with predicate]" else ""}, but didn't arrived.")
+        } else {
+            return packet as T
+        }
+    }
+
+    suspend fun multiplex(input1: ReceiveChannel<Any>, input2: ReceiveChannel<Any>): ReceiveChannel<Any> {
+        val c = Channel<Any>()
+        async(CommonPool) {
+            for (v in input1)
+                c.send(v)
+        }
+        async(CommonPool) {
+            for (v in input2)
+                c.send(v)
+        }
+        return c
     }
 
     suspend fun cleanPacketHistory() {
@@ -71,10 +96,10 @@ class PacketArrivalVerifier(val name: String) {
         responseChannel.receive()
     }
 
-    suspend fun <T> inCaseOf(expectedPacketClass: KClass<T>, timeout: Long = 5000, action: (T) -> Unit)
+    suspend fun <T> inCaseOf(expectedPacketClass: KClass<T>, timeout: Long = 5000, action: suspend (T) -> Unit)
             where T : FromServer.Packet {
         val responseChannel = Channel<FromServer.Packet>()
-        val deferredArrivedPacked = async(CommonPool) {
+        val deferredArrivedPacket = async(CommonPool) {
             actor.send(IncaseOfPacketMessage(
                     expectedPacketClass as KClass<FromServer.Packet>,
                     timeout,
@@ -82,10 +107,12 @@ class PacketArrivalVerifier(val name: String) {
             )
             responseChannel.receive() as T
         }
-        deferredArrivedPacked.invokeOnCompletion { completionHandler ->
+        deferredArrivedPacket.invokeOnCompletion { completionHandler ->
             val thereWasNoCancellationTimeout = completionHandler == null
             if (thereWasNoCancellationTimeout) {
-                action(deferredArrivedPacked.getCompleted())
+                async(CommonPool) {
+                    action(deferredArrivedPacket.getCompleted())
+                }
             }
         }
     }
@@ -105,6 +132,8 @@ class PacketArrivalVerifier(val name: String) {
                         expectedPacketArrivedList.add(found)
                         if (!found.waitUntilTimeout) {
                             tasks.remove(found)
+                        } else {
+                            packetHistory.add(msg.incomingPacket)
                         }
                     } else {
                         packetHistory.add(msg.incomingPacket)
@@ -114,7 +143,9 @@ class PacketArrivalVerifier(val name: String) {
                     val expectedPacketsInHistory = packetHistory.filter { it::class.isSubclassOf(msg.expectedPacketClass) && msg.predicate?.invoke(it) ?: true }
                     if (expectedPacketsInHistory.isNotEmpty()) {
                         expectedPacketsInHistory.forEach { p -> msg.responseChannel.send(p) }
-                        packetHistory.removeAll(expectedPacketsInHistory)
+                        if (!msg.waitUntilTimeout) {
+                            packetHistory.removeAll(expectedPacketsInHistory)
+                        }
                     }
                     if (expectedPacketsInHistory.isEmpty() || msg.waitUntilTimeout) {
                         tasks.add(msg)
@@ -143,6 +174,10 @@ class PacketArrivalVerifier(val name: String) {
                 }
             }
         }
+    }
+
+    init {
+        session.subscribeForPackerArrival(this.actor.channel)
     }
 }
 

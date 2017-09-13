@@ -32,12 +32,10 @@ data class TestCaseError(val e: Exception) : FailureReason() {
         return "TestCaseError(${e.message})"
     }
 }
-class NoFreeMap : FailureReason()
-class NoFreeGM : FailureReason()
-class NoFreeRoClient : FailureReason()
-data class ExpectationFails(val reason: String) : FailureReason()
 
-data class TestMetadata(val testCase: TestCase, val tryCount: Int, val failureReasons: List<FailureReason>, val startTime: Long, val endTime: Long)
+data class NoFreeResource(val t: String) : FailureReason()
+
+data class TestMetadata(val testCase: TestCase, val tryCount: Int, val failureReasons: List<FailureReason?>, val startTime: Long, val endTime: Long)
 
 data class ROClient(val clientState: ClientState, val mapSession: Session, val packetArrivalVerifier: PacketArrivalVerifier)
 
@@ -48,7 +46,7 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
 
 
-    val actor = actor<TestDirectorMessage>(CommonPool) {
+    val actor = actor<TestDirectorMessage>(CommonPool, 64) {
         launch(CommonPool) {
             try {
                 while (true) { // to itself
@@ -95,8 +93,7 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
 
                             val mapSession = Session("roClient - mapSession", connect(charName, toIpString(mapData.ip), mapData.port))
                             logger.debug("${msg.username} connected to map server: ${toIpString(mapData.ip)}, ${mapData.port}")
-                            val packetArrivalVerifier = PacketArrivalVerifier(charName)
-                            mapSession.subscribeForPackerArrival(packetArrivalVerifier.actor.channel)
+                            val packetArrivalVerifier = PacketArrivalVerifier(charName, mapSession)
                             mapSession.asyncStartProcessingIncomingPackets()
                             mapSession.send(ToServer.ConnectToMapServer(
                                     accountId = loginResponse.accountId,
@@ -123,13 +120,13 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                     }
                     is WarpChar -> {
                         if (freeGMList.isEmpty()) {
-                            this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeGM()))
+                            this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeResource("GM")))
                             continue@actorChannelLoop
                         }
                         val gm = freeGMList.removeAt(0)
                         gmsOccupiedByTestCases.put(msg.sourceTestCase, gm)
                         if (msg.dstMapName == null && freeEmptyMapList.isEmpty()) {
-                            this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeMap()))
+                            this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeResource("Map")))
                             continue@actorChannelLoop
                         }
                         val (dstMapname, dstX, dstY) = if (msg.dstMapName == null) {
@@ -139,26 +136,29 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                             Triple(msg.dstMapName, msg.dstX, msg.dstY)
                         }
                         if (mapsOccupiedByTests.containsValue(dstMapname)) {
-                            this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeMap()))
+                            this@actor.channel.send(TestFailed(msg.sourceTestCase, NoFreeResource("Map")))
                             continue@actorChannelLoop
                         }
                         mapsOccupiedByTests.put(msg.sourceTestCase, dstMapname)
                         gm.actor.send(TakeMeTo(msg.charName, dstMapname, dstX, dstY))
                     }
                     is StartTest -> {
-                        val alreadyStartedTestMetadata = tryItLaterTests.find { it.testCase == msg.testCase }
-                        val testMetadata = if (alreadyStartedTestMetadata != null) {
-                            measureTimeAndMoveMetadata(tryItLaterTests, runningTests, alreadyStartedTestMetadata.testCase)
+                        val alreadyStartedTestMetadata = tryItLaterTests.find { it.testCase.scenarioDescription == msg.testCase.scenarioDescription }
+                        if (alreadyStartedTestMetadata != null) {
+                            measureTimeAndMoveMetadata(tryItLaterTests, runningTests, alreadyStartedTestMetadata.testCase) {
+                                copy(
+                                        tryCount = this.tryCount + 1,
+                                        startTime = System.currentTimeMillis()
+                                )
+                            }
                             logger.debug("Try again ${msg.testCase.scenarioDescription}")
-                            alreadyStartedTestMetadata.copy(
-                                    tryCount = alreadyStartedTestMetadata.tryCount + 1,
-                                    startTime = System.currentTimeMillis()
-                            )
+
                         } else {
-                            TestMetadata(msg.testCase, 1, emptyList(), System.currentTimeMillis(), 0)
+                            val testMetadata = TestMetadata(msg.testCase, 1, emptyList(), System.currentTimeMillis(), 0)
+                            runningTests.add(testMetadata)
+                            logger.debug("Starting test [${msg.testCase.scenarioDescription}], RoClients[${freeROClients.size}\\${maxRoClient}].")
                         }
-                        logger.debug("Starting test [${msg.testCase.scenarioDescription}], RoClients[${freeROClients.size}\\${maxRoClient}].")
-                        runningTests.add(testMetadata)
+
                         launch(CommonPool) {
                             try {
                                 msg.testCase.testLogic(
@@ -166,14 +166,16 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                                 )
                             } catch (e: Exception) {
                                 logger.error(msg.testCase.scenarioDescription, e)
-                                this@actor.channel.send(TestFailed(msg.testCase, TestCaseError(e)))
+                                if (e !is WaitingForPacketTimeout) {
+                                    this@actor.channel.send(TestFailed(msg.testCase, TestCaseError(e)))
+                                }
                             }
                         }
                     }
                     is RequestRoCLient -> {
                         if (freeROClients.isEmpty()) {
                             logger.warn("There is no free ROClient for ${msg.testCase.scenarioDescription}!")
-                            measureTimeAndMoveMetadata(runningTests, tryItLaterTests, msg.testCase, NoFreeRoClient())
+                            this@actor.channel.send(TestFailed(msg.testCase, NoFreeResource("RoClient")))
                             msg.answerChannel.send(null)
                         } else {
                             logger.debug("RoClients[${freeROClients.size - 1}\\${maxRoClient}] was requested by [${msg.testCase.scenarioDescription}].")
@@ -184,7 +186,11 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                         }
                     }
                     is TestSucceeded -> {
-                        measureTimeAndMoveMetadata(runningTests, finishedTests, msg.testCase)
+                        measureTimeAndMoveMetadata(runningTests, finishedTests, msg.testCase) {
+                            copy(
+                                    failureReasons = this.failureReasons + listOf(null)
+                            )
+                        }
                         releaseGmsAndChars(gmsOccupiedByTestCases, freeGMList, roClientsOccupiedByTestCases, freeROClients, mapsOccupiedByTests, msg.testCase)
                         logger.info("Test SUCCESSFUL: ${msg.testCase.scenarioDescription}")
 
@@ -197,22 +203,13 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
                     is TestFailed -> {
                         logger.error("${msg.sourceTestCase.scenarioDescription} FAILED: ${msg.failureReason}")
                         releaseGmsAndChars(gmsOccupiedByTestCases, freeGMList, roClientsOccupiedByTestCases, freeROClients, mapsOccupiedByTests, msg.sourceTestCase)
-                        if (runningTests.any { msg.sourceTestCase == it.testCase }) {
-                            measureTimeAndMoveMetadata(runningTests, finishedTests, msg.sourceTestCase, msg.failureReason)
-                            when (msg.failureReason) {
-                                is NoFreeMap -> {
-                                    launch(CommonPool) {
-                                        delay(3000)
-                                        // try again this task
-                                    }
-                                }
-                                is NoFreeGM -> {
-                                    launch(CommonPool) {
-                                        delay(3000)
-                                        // try again this task
-                                    }
-                                }
+                        if (runningTests.any { msg.sourceTestCase.scenarioDescription == it.testCase.scenarioDescription }) {
+                            val targetList = if (msg.failureReason is TestCaseError) {
+                                finishedTests
+                            } else {
+                                tryItLaterTests
                             }
+                            measureTimeAndMoveMetadata(runningTests, targetList, msg.sourceTestCase, msg.failureReason)
                         }// else the test is already waiting for retrying
                         logState(freeROClients, maxRoClient, freeGMList, freeEmptyMapList, finishedTests, tryItLaterTests, runningTests)
                         if (runningTests.isEmpty() && tryItLaterTests.isEmpty()) {
@@ -250,13 +247,16 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
         sb.append("|").append(alignCenter("Name", nameColumnLength)).append("|")
         sb.append(alignCenter("Duration (ms)", durationColumnLength)).append("|")
         sb.append(alignCenter("TryCount", tryCountLen)).append("|")
-        sb.append(alignCenter("State", stateLength)).append("|")
+        sb.append(alignCenter("State <------", stateLength)).append("|")
         sb.append("\n=".padEnd(tableLen, '='))
 
+
         val allTestsAndTheirState = finishedTests.map {
-            it to if (it.failureReasons.isNotEmpty()) "Fail(${it.failureReasons.last()})" else "Success"
+            val statusList = it.failureReasons.map { if (it != null) it.toString() else "Success"}.reversed().joinToString(" <-- ")
+            it to statusList
         } + tryItLaterTests.map {
-            it to if (it.failureReasons.isNotEmpty()) "Waiting(${it.failureReasons.last()})" else "Waiting"
+            val statusList = it.failureReasons.map { if (it != null) it.toString() else "Waiting"}.reversed().joinToString(" <-- ")
+            it to statusList
         } + runningTests.map { it to "Running" }
 
         allTestsAndTheirState.forEach { (test, state) ->
@@ -268,7 +268,6 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
             sb.append(alignCenter("${test.tryCount}", tryCountLen))
             sb.append("|")
             sb.append(" " + state)
-            sb.append("|")
         }
         sb.append("\n=".padEnd(tableLen, '='))
         logger.info("\n${sb.toString()}")
@@ -283,13 +282,14 @@ class TestDirector(val gmActors: List<GmActor>, val emptyMaps: List<MapPos>) {
     private fun measureTimeAndMoveMetadata(from: MutableList<TestMetadata>,
                                            to: MutableList<TestMetadata>,
                                            testCase: TestCase,
-                                           failureReason: FailureReason? = null) {
-        val testMetadata = from.find { it.testCase == testCase }!!
+                                           failureReason: FailureReason? = null,
+                                           metadataModifier: TestMetadata.() -> TestMetadata = { this }) {
+        val testMetadata = from.find { it.testCase.scenarioDescription == testCase.scenarioDescription }!!
         from.remove(testMetadata)
         to.add(testMetadata.copy(
                 endTime = System.currentTimeMillis(),
                 failureReasons = if (failureReason != null) testMetadata.failureReasons + failureReason else testMetadata.failureReasons
-        ))
+        ).metadataModifier())
     }
 
     private fun releaseGmsAndChars(gmsOccupiedByTestCases: MutableMap<TestCase, GmActor>,
@@ -317,17 +317,12 @@ class TestDirectorCommunicator(val testCase: TestCase,
 
     suspend fun warpMeTo(dstMapName: String?, dstX: Int, dstY: Int, charName: String, mapSession: Session, packetArrivalVerifier: PacketArrivalVerifier) {
         testDirectorChannel.send(WarpChar(testCase, charName, dstMapName, dstX, dstY))
-        try {
-            packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 5000) { packet ->
-                packet.msg == "Done"
-            }
-            testDirectorChannel.send(MyGmHasFinishedHerJob(testCase))
-            mapSession.send(ToServer.LoadEndAck())
-        } catch (e: CancellationException) {
-            logger.error("warpMeToEmptyMap", e)
-            testDirectorChannel.send(TestFailed(testCase, NoFreeMap()))
-//            throw e
+
+        packetArrivalVerifier.waitForPacket(FromServer.NotifyPlayerWhisperChat::class, 5000) { packet ->
+            packet.msg == "Done"
         }
+        testDirectorChannel.send(MyGmHasFinishedHerJob(testCase))
+        mapSession.send(ToServer.LoadEndAck())
     }
 
     suspend fun requestRoClient(): ROClient {
@@ -337,7 +332,7 @@ class TestDirectorCommunicator(val testCase: TestCase,
         if (roClient != null) {
             return roClient
         } else {
-            testDirectorChannel.send(TestFailed(testCase, NoFreeRoClient()))
+            testDirectorChannel.send(TestFailed(testCase, NoFreeResource("RoClient")))
             throw CancellationException("NoFreeRoClient")
         }
     }
