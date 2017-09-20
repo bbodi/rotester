@@ -34,4 +34,5 @@ dependencies {
     compile group: 'ch.qos.logback', name: 'logback-classic', version: '1.0.9'
     compile group: 'ch.qos.logback', name: 'logback-core', version: '1.0.9'
     compile "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
+    compile 'org.reflections:reflections:0.9.11'
 }

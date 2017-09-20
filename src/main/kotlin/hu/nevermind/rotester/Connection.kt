@@ -97,6 +97,7 @@ data class Connection(val name: String, val incomingDataProducer: ReceiveChannel
         outgoingBuffer.flip()
         val sendingBytes = ByteArray(outgoingBuffer.remaining())
         if (logger.isTraceEnabled) {
+            logger.trace("[$name] Sending bytes pos: ${outgoingBuffer.position()} limit: ${outgoingBuffer.limit()}")
             logger.trace("[$name] Sending bytes: \n" + toHexDump(outgoingBuffer.duplicate(), outgoingBuffer.position(), outgoingBuffer.limit()))
         }
         outgoingBuffer.get(sendingBytes, outgoingBuffer.position(), outgoingBuffer.limit())

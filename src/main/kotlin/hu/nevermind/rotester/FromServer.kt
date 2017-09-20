@@ -2,6 +2,7 @@ package hu.nevermind.rotester
 
 import hu.nevermind.rotester.FromServer.BroadcastMessage.Companion.reader
 import hu.nevermind.rotester.FromServer.ChangeMap.Companion.reader
+import hu.nevermind.rotester.FromServer.ChangeOption.Companion.reader
 import hu.nevermind.rotester.FromServer.CharCreationRejected.Companion.reader
 import hu.nevermind.rotester.FromServer.CharCreationSuccessful.Companion.reader
 import hu.nevermind.rotester.FromServer.CharListPages.Companion.reader
@@ -287,7 +288,7 @@ object FromServer {
         companion object {
             val reader: FromServer.PacketFieldReader.() -> CharSelectErrorResponse? = {
                 FromServer.CharSelectErrorResponse(
-                        reason = when(byte1()) {
+                        reason = when (byte1()) {
                             1 -> "Server Closed"
                             2 -> "Someone has already logged in with this id"
                             8 -> "Already online"
@@ -969,6 +970,20 @@ object FromServer {
         }
     }
 
+    data class ChangeOption(val blId: Int, val bodyState: Int, val healtState: Int, val effectState: Int, val pkMode: Boolean) : Packet {
+        companion object {
+            val reader: FromServer.PacketFieldReader.() -> ChangeOption? = {
+                FromServer.ChangeOption(
+                        blId = byte4(),
+                        bodyState = ubyte2(),
+                        healtState = ubyte2(),
+                        effectState = byte4(),
+                        pkMode = byte1() == 1
+                )
+            }
+        }
+    }
+
     enum class ItemType {
         HEALING,
         UNKNOWN, //1
@@ -1127,6 +1142,7 @@ object FromServer {
         }
     }
 
+    // header, len (body + header)
     val PACKETS = listOf(
             Triple(0x83e, 26, LoginFailResponsePacket.reader),
             Triple(0x6c, 3, RejectedFromCharServer.reader),
@@ -1177,7 +1193,8 @@ object FromServer {
             Triple(0x9fd, 0, UnitWalking.reader),
             Triple(0xa0d, 0, InventoryList.reader),
             Triple(0x991, 0, InventoryList.reader),
-            Triple(0x7f, 6, NotifyTime.reader)
+            Triple(0x7f, 6, NotifyTime.reader),
+            Triple(0x229, 15, ChangeOption.reader)
     )
 
     class PacketFieldReader(val bb: ByteBuffer) {

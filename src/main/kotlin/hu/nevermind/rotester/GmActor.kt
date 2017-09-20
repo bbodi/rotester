@@ -20,7 +20,7 @@ class GmActor(private val username: String, private val password: String) {
 
     private val logger: Logger = LoggerFactory.getLogger(this::class.simpleName)
 
-
+// 2017-09-20 07:29:00 [ForkJoinPool.commonPool-worker-2 @coroutine#126] TRACE Connection - [gmgm] Incoming Packet [NotifyPlayerChat(msg=Invisible: On)] - [18 bytes]
     val actor = actor<GmActorMessage>(CommonPool) {
         var mapName: String = ""
         var pos: Pos = Pos(0, 0, 0)
@@ -58,7 +58,6 @@ class GmActor(private val username: String, private val password: String) {
                     }
                 }
 
-                mapSession.send(ToServer.Chat("$charName : GM is here!"))
 //                mapSession.send(ToServer.Chat("$charName : ($mapName): ${pos.x}, ${pos.y}"))
                 packetArrivalVerifier.cleanPacketHistory()
                 for (msg in channel) {

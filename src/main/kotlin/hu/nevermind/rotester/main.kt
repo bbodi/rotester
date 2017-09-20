@@ -1,14 +1,14 @@
 package hu.nevermind.rotester
 
-import hu.nevermind.rotester.test.WalkingTest
-import hu.nevermind.rotester.test.WarpCommandTest
-import hu.nevermind.rotester.test.WhisperTest
+import hu.nevermind.rotester.test.TestDefinition
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
+import org.reflections.Reflections
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.coroutines.experimental.suspendCoroutine
 
 val logger = LoggerFactory.getLogger("global")
 
@@ -21,18 +21,31 @@ fun main(args: Array<String>) = runBlocking {
     val jobs = List(1) { index ->
         launch(CommonPool) {
             val testDirector = TestDirector(
-                    listOf(GmActor("gmgm", "gmgm")),
-//                    emptyList(),
-                    listOf(TestDirector.MapPos("prontera", 100, 100))
+                    listOf(
+                            GmActor("gmgm", "gmgm"),
+                            GmActor("gmgm1", "gmgm1"),
+                            GmActor("gmgm2", "gmgm2")
+                    ),
+                    listOf(
+                            //                    emptyList(),
+                            TestDirector.MapPos("prt_fild08", 162, 353),
+                            TestDirector.MapPos("prt_fild05", 84, 93),
+                            TestDirector.MapPos("prt_fild09", 138, 115),
+                            TestDirector.MapPos("prt_fild10", 217, 97)
+                    )
             )
             (1..6).forEach {
                 testDirector.actor.send(LoginToMap("bot$it", "bot$it"))
             }
 
-            WhisperTest.run(testDirector)
-            WarpCommandTest.run(testDirector)
-            WalkingTest.run(testDirector)
-
+            val testClasses = Reflections("hu.nevermind.rotester").getSubTypesOf(TestDefinition::class.java)
+            testClasses.forEach { testClass ->
+                suspendCoroutine<Int> { coroutine ->
+                    val newInstance = testClass.newInstance()
+                    testClass.methods.filter { it.name.contains("run") }.first().invoke(newInstance, testDirector, coroutine)
+                    coroutine.resume(0)
+                }
+            }
             testDirector.actor.join()
         }
     }
