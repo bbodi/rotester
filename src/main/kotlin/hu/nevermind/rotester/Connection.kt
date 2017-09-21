@@ -31,7 +31,7 @@ suspend fun connect(name: String, host: String, port: Int): Connection {
             override fun completed(result: Void?, attachment: Int?) {
                 val incomingDataProducer = produce<ByteArray>(CommonPool) {
                     while (true) {
-                        val out = ByteArray(256)
+                        val out = ByteArray(1024)
                         val buffer = ByteBuffer.wrap(out)
 
                         val incomingData = suspendCoroutine<ByteArray> { continuation ->

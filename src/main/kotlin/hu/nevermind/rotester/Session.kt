@@ -192,7 +192,7 @@ class Session(val name: String, val connection: Connection) : AutoCloseable {
 
     private var packetArrivalSubscribers: MutableList<SendChannel<IncomingPacketArrivedMessage>> = arrayListOf()
 
-    fun asyncStartProcessingIncomingPackets() {
+    fun asyncStartProcessingIncomingPackets(onEof: suspend () -> Unit) {
         launch(CommonPool) {
             try {
                 while (true) {
@@ -200,7 +200,8 @@ class Session(val name: String, val connection: Connection) : AutoCloseable {
                     delay(10)
                 }
             } catch (e: Exception) {
-                logger.error("[$name] asyncStartProcessingIncomingPackets", e)
+                logger.error("[$name]", e)
+                onEof()
             }
         }
     }

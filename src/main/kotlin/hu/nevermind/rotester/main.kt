@@ -72,7 +72,10 @@ suspend fun connectToCharServerAndSelectChar(username: String, charServerIp: Str
                 sex = loginResponse.sex
         ))
         val newAuthId = charSession.connection.readInt()
-        charSession.asyncStartProcessingIncomingPackets()
+        charSession.asyncStartProcessingIncomingPackets {
+            // kliens kiléptetése
+            // test újrakezdése
+        }
         packetArrivalVerifier.waitForPacket(FromServer.CharWindow::class, 5000)
         val characterList = packetArrivalVerifier.waitForPacket(FromServer.CharacterList::class, 5000)
         val pincodeState = packetArrivalVerifier.waitForPacket(FromServer.PincodeState::class, 5000)
@@ -116,7 +119,10 @@ suspend fun connectToCharServerAndSelectChar(username: String, charServerIp: Str
 
 suspend fun login(username: String, password: String): FromServer.LoginSucceedResponsePacket {
     val loginSession = Session("login[$username]", connect("login[$username]", "localhost", 6900))
-    loginSession.asyncStartProcessingIncomingPackets()
+    loginSession.asyncStartProcessingIncomingPackets {
+        // kliens kiléptetése
+        // test újrakezdése
+    }
     val packetArrivalVerifier = PacketArrivalVerifier("login[$username]", loginSession)
     loginSession.send(ToServer.LoginPacket(username, password))
     val packet = packetArrivalVerifier.waitForPacket(FromServer.Packet::class, 5000)
